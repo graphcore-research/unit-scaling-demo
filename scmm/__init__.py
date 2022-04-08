@@ -1,3 +1,3 @@
 """Scaled matmuls experimentation."""
 
-from . import datasets  # NOQA: F401
+from . import datasets, xpu  # NOQA: F401
