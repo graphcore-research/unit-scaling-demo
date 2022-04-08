@@ -1,0 +1,20 @@
+# Scale matmuls not initialisation
+
+We'd like weights, activations & gradients all to be unit-normal at initialisation. To achieve this, we will relax the requirement to calculate correct gradients by introducing separate scaling factors for activations in the forwards pass and for gradients in the backwards pass.
+
+## Usage
+
+```bash
+popenv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+./dev
+```
+
+## Literature review
+
+| Paper | Notes |
+| --- | --- |
+| Understanding the difficulty of training deep feedforward neural networks [[pdf](https://proceedings.mlr.press/v9/glorot10a/glorot10a.pdf)] | Introduced "Glorot" or "Xavier" initialisation, very widespread. |
+| Tensor Programs V [[arxiv](https://arxiv.org/abs/2203.03466)] | A hyperparameter reparametrisation for initialisation and learning rate based on network width, helping hyperparameters to transfer across scale. |
+| Weight Normalization [[arxiv](https://arxiv.org/abs/1602.07868)] | A differentiable reparameterisation for network parameters based on explicit normalisation and scaling. |

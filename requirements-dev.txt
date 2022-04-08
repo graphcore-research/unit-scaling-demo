@@ -1,0 +1,12 @@
+-r requirements.txt
+black
+isort
+jupyterlab
+mypy
+pandas
+pylint
+pytest
+pytest-cov
+seaborn
+tqdm
+types-dataclasses
