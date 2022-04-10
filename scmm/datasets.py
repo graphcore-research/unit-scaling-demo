@@ -25,38 +25,79 @@ def to_str(terms: np.ndarray, vocab: Vocab) -> str:
 
 
 @dataclass
+class BatchSettings:
+    """Settings for a stream of batches."""
+
+    sequences: int
+    sequence_length: int
+    overlap_length: int
+    loop_seed: Optional[int]
+
+    @property
+    def shape(self) -> Tuple[int, int]:
+        """The 2D shape of a batch."""
+        return (self.sequences, self.sequence_length)
+
+    @property
+    def target_length(self) -> int:
+        """The maximum number of target tokens per sequence."""
+        return self.sequence_length - self.overlap_length
+
+    @property
+    def target_tokens(self) -> int:
+        """The maximum number of target tokens."""
+        return self.sequences * self.target_length
+
+
+@dataclass
 class Data:
     """A dataset that can generate batches."""
 
     vocab: Vocab
     parts: Dict[str, np.ndarray]
 
-    def train_batches(
-        self, batch_sequences: int, sequence_length: int, overlap_length: int, seed: int
-    ) -> Iterable[Batch]:
-        """An infinite generator of shuffled batches for training."""
-        return _batches(
-            self.parts["train"],
-            batch_sequences=batch_sequences,
-            sequence_length=sequence_length,
-            overlap_length=overlap_length,
-            loop_with_seed=seed,
-        )
+    def batches(self, part: str, settings: BatchSettings) -> Iterable[Batch]:
+        """Batch with overlapping sequences.
 
-    def eval_batches(
-        self, part: str, batch_sequences: int, sequence_length: int, overlap_length: int
-    ) -> Iterable[Batch]:
-        """A finite generator of unshuffled batches for validation/test."""
-        return _batches(
-            self.parts[part],
-            batch_sequences=batch_sequences,
-            sequence_length=sequence_length,
-            overlap_length=overlap_length,
-            loop_with_seed=None,
-        )
+        Note - if `loop_seed` is non-None, generates an infinite stream of batches, sampled
+        with replacement.
+        """
+
+        data = self.parts[part]
+        batch_tokens = []
+        batch_mask = []
+        idxs = np.arange(settings.sequence_length)
+        if settings.loop_seed is None:
+            starts: Iterable[int] = range(0, len(data), settings.target_length)
+        else:
+            random = np.random.Generator(np.random.PCG64(settings.loop_seed))
+            starts = (
+                random.integers(len(data) - settings.target_length) for _ in it.count()
+            )
+
+        for start in starts:
+            begin = max(0, start - settings.overlap_length)
+            sequence = data[begin : start + settings.target_length]
+            # "token padding"
+            npad = settings.sequence_length - len(sequence)
+            sequence = np.pad(sequence, ((0, npad),))
+            mask = ((start - begin) <= idxs) & (idxs < (len(sequence) - npad))
+            batch_tokens.append(sequence)
+            batch_mask.append(mask)
+            if settings.sequences <= len(batch_tokens):
+                yield dict(tokens=np.stack(batch_tokens), mask=np.stack(batch_mask))
+                batch_tokens.clear()
+                batch_mask.clear()
+
+        # Incomplete final batch - needs "sequence padding"
+        if batch_tokens:
+            npad = settings.sequences - len(batch_tokens)
+            batch_tokens.extend(npad * [batch_tokens[-1]])
+            batch_mask.extend(npad * [np.zeros_like(batch_mask[-1])])
+            yield dict(tokens=np.stack(batch_tokens), mask=np.stack(batch_mask))
 
 
-def load_char(root: Path, **parts: str) -> Data:
+def load_character(root: Path, **parts: str) -> Data:
     """Load a character-based dataset.
 
     e.g. given parts=dict(train="train.txt", valid="valid.txt")
@@ -74,42 +115,3 @@ def load_char(root: Path, **parts: str) -> Data:
             for name, path in parts.items()
         },
     )
-
-
-def _batches(
-    data: np.ndarray,
-    batch_sequences: int,
-    sequence_length: int,
-    overlap_length: int,
-    loop_with_seed: Optional[int],
-) -> Iterable[Batch]:
-    """Batch with overlapping sequences."""
-    batch_tokens = []
-    batch_mask = []
-    idxs = np.arange(sequence_length)
-    if loop_with_seed is None:
-        starts: Iterable[int] = range(0, len(data), sequence_length - overlap_length)
-    else:
-        random = np.random.Generator(np.random.PCG64(loop_with_seed))
-        starts = (random.integers(sequence_length - overlap_length) for _ in it.count())
-
-    for start in starts:
-        begin = max(0, start - overlap_length)
-        sequence = data[begin : start + sequence_length - overlap_length]
-        # "token padding"
-        npad = sequence_length - len(sequence)
-        sequence = np.pad(sequence, ((0, npad),))
-        mask = ((start - begin) <= idxs) & (idxs < (len(sequence) - npad))
-        batch_tokens.append(sequence)
-        batch_mask.append(mask)
-        if batch_sequences <= len(batch_tokens):
-            yield dict(tokens=np.stack(batch_tokens), mask=np.stack(batch_mask))
-            batch_tokens.clear()
-            batch_mask.clear()
-
-    # Incomplete final batch - needs "sequence padding"
-    if batch_tokens:
-        npad = batch_sequences - len(batch_tokens)
-        batch_tokens.extend(npad * [batch_tokens[-1]])
-        batch_mask.extend(npad * [np.zeros_like(batch_mask[-1])])
-        yield dict(tokens=np.stack(batch_tokens), mask=np.stack(batch_mask))

@@ -24,36 +24,31 @@ def test_data():
         vocab=vocab,
         parts={k: datasets.to_ids(v, vocab, np.uint16) for k, v in parts.items()},
     )
-    for args in [
-        dict(batch_sequences=3, sequence_length=6, overlap_length=2),
-        dict(batch_sequences=1, sequence_length=8, overlap_length=0),
+    S = datasets.BatchSettings
+    for settings in [
+        S(sequences=3, sequence_length=6, overlap_length=2, loop_seed=None),
+        S(sequences=3, sequence_length=6, overlap_length=2, loop_seed=100),
+        S(sequences=1, sequence_length=8, overlap_length=0, loop_seed=None),
+        S(sequences=1, sequence_length=8, overlap_length=0, loop_seed=200),
     ]:
-        batch_shape = (args["batch_sequences"], args["sequence_length"])
-        train_batches = list(
-            it.islice(data.train_batches(**args, seed=sum(args.values())), 100)
-        )
-        for batch in train_batches:
-            assert batch["tokens"].shape == batch_shape
-            assert batch["tokens"].dtype == np.uint16
-            assert batch["mask"].shape == batch_shape
-            assert batch["mask"].dtype == np.bool
-            assert (
-                np.sum(batch["mask"])
-                >= int(args["sequence_length"] - args["overlap_length"])
-                * args["batch_sequences"]
-            )
-
         for part, text in parts.items():
-            eval_batches = list(data.eval_batches(part, **args))
-            for batch in eval_batches:
-                assert batch["tokens"].shape == batch_shape
+            max_batch = 25
+            batches = list(it.islice(data.batches(part, settings), max_batch))
+            for batch in batches:
+                assert batch["tokens"].shape == settings.shape
                 assert batch["tokens"].dtype == np.uint16
-                assert batch["mask"].shape == batch_shape
+                assert batch["mask"].shape == settings.shape
                 assert batch["mask"].dtype == np.bool
-                assert np.sum(batch["mask"]) > 0
-            flat_tokens = np.ravel([b["tokens"] for b in eval_batches])
-            flat_mask = np.ravel([b["mask"] for b in eval_batches])
-            assert datasets.to_str(flat_tokens[flat_mask], vocab) == text
+                assert np.sum(batch["mask"]) >= (
+                    1 if settings.loop_seed is None else settings.target_tokens
+                )
+
+            if settings.loop_seed is None:
+                flat_tokens = np.ravel([b["tokens"] for b in batches])
+                flat_mask = np.ravel([b["mask"] for b in batches])
+                assert datasets.to_str(flat_tokens[flat_mask], vocab) == text
+            else:
+                assert len(batches) == max_batch
 
 
 def test_load():
@@ -61,7 +56,7 @@ def test_load():
     #     ch for path in Path("data").glob("*.txt") for ch in path.read_text("utf8")
     # })))
     folder = Path(__file__).parent / "data"
-    data = datasets.load_char(folder, train="train.txt", valid="valid.txt")
+    data = datasets.load_character(folder, train="train.txt", valid="valid.txt")
 
     assert datasets.to_str(data.parts["valid"], data.vocab) == (
         folder / "valid.txt"
