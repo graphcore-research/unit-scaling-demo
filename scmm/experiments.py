@@ -26,6 +26,10 @@ def log_wandb(item: Dict[str, Any]) -> None:
             dir="out",
             project="scaled-matmuls",
         )
+    elif item["kind"] == "stats":
+        wandb.run.summary.update(  # type:ignore[union-attr]
+            utility.remove_keys(item, "kind")
+        )
     else:
         wandb.log(utility.remove_keys(item, "step"), step=item["step"])
 
@@ -137,5 +141,6 @@ def run(settings: Settings) -> None:
         model = models.Model(settings.model)
         with utility.logging(*_loggers(settings, model)) as log:
             log(_settings_line(settings))
+            log(dict(kind="stats", **model.weight_stats()))
             for item in training.train(model, data, context, settings.training):
                 log(item)

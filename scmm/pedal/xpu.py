@@ -52,7 +52,7 @@ def _make_cache(**function_args: Any) -> FunctionCache:
 class CpuSettings:
     """CPU-specific settings."""
 
-    compile: bool
+    compile: bool = False
 
     type: str = "cpu"
 

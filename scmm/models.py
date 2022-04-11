@@ -1,7 +1,7 @@
 """Core model definitions."""
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 import tensorflow as tf
@@ -80,6 +80,14 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
             shape=settings.vocab_size,
             dtype=self.dtype,
             initializer=keras.initializers.zeros,
+        )
+
+    def weight_stats(self) -> Dict[str, Any]:
+        """Stats regarding weights in the model."""
+        shapes = {k: tuple(v.shape) for k, v in utility.named_weights(self)}
+        return dict(
+            n_weights=sum(np.prod(v) for v in shapes.values()),
+            weight_shapes=shapes,
         )
 
     def save(self) -> Dict[str, np.ndarray]:

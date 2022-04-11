@@ -45,6 +45,7 @@ def test_run_experiment(tmp_path: Path):
     with contextlib.ExitStack() as stack:
         wandb_init = stack.enter_context(um.patch("wandb.init"))
         wandb_log = stack.enter_context(um.patch("wandb.log"))
+        stack.enter_context(um.patch("wandb.run"))
         stack.enter_context(
             um.patch.dict(
                 os.environ, {"SSUB_UID": "ssub123", "SLURM_JOB_ID": "slurm123"}
@@ -74,6 +75,10 @@ def test_run_experiment(tmp_path: Path):
     (log_settings,) = log_by_kind["settings"]
     assert log_settings["metadata"]["experiment"] == "testxp"
     assert isinstance(log_settings["model"]["seed"], int)
+
+    (log_stats,) = log_by_kind["stats"]
+    assert 5 * 64 * 64 < log_stats["n_weights"]
+    assert len(log_stats["weight_shapes"])
 
     assert len(log_by_kind["train_step"]) == 100
     first_step, *_, last_step = log_by_kind["train_step"]
