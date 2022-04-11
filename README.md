@@ -20,3 +20,5 @@ python run_experiment.py
 | Understanding the difficulty of training deep feedforward neural networks [[pdf](https://proceedings.mlr.press/v9/glorot10a/glorot10a.pdf)] | Introduced "Glorot" or "Xavier" initialisation, very widespread. |
 | Tensor Programs V [[arxiv](https://arxiv.org/abs/2203.03466)] | A hyperparameter reparametrisation for initialisation and learning rate based on network width, helping hyperparameters to transfer across scale. |
 | Weight Normalization [[arxiv](https://arxiv.org/abs/1602.07868)] | A differentiable reparameterisation for network parameters based on explicit normalisation and scaling. |
+| Centered Weight Normalization [[pdf](https://openaccess.thecvf.com/content_ICCV_2017/papers/Huang_Centered_Weight_Normalization_ICCV_2017_paper.pdf)] | Weight normalization with centering (zero mean). |
+| Weight Standardization [[arxiv](https://arxiv.org/abs/1903.10520)] | Centered Weight Normalization without a learnable length. |
