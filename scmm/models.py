@@ -87,6 +87,11 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
         shapes = {k: tuple(v.shape) for k, v in utility.named_weights(self)}
         return dict(
             n_weights=sum(np.prod(v) for v in shapes.values()),
+            n_weights_no_embedding=sum(
+                np.prod(v)
+                for k, v in shapes.items()
+                if k not in {"embed.embeddings", "predict.kernel"}
+            ),
             weight_shapes=shapes,
         )
 
