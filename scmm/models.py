@@ -28,6 +28,16 @@ def _built(layer: keras.layers.Layer, shape: Tuple[int, ...]) -> keras.layers.La
     return layer
 
 
+def batched_gather(tables: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:
+    """Simulate tf.gather(tables, indices, batch_dims=indices.ndim)."""
+    assert len(tables.shape) == len(indices.shape) + 1
+    offsets = (
+        np.arange(np.prod(indices.shape)).reshape(indices.shape) * tables.shape[-1]
+    )
+    values = tf.gather(tf.reshape(tables, (-1,)), tf.reshape(indices + offsets, (-1,)))
+    return tf.reshape(values, indices.shape)
+
+
 class Model(keras.layers.Layer):  # type:ignore[misc]
     """Base language model."""
 
@@ -97,8 +107,9 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
     @staticmethod
     def _total_loss(scores: tf.Tensor, tokens: tf.Tensor, mask: tf.Tensor) -> tf.Tensor:
         logp = tf.nn.log_softmax(scores)
-        target_logp = -tf.gather(logp, tf.cast(tokens, tf.int32), batch_dims=2)
-        return tf.reduce_sum(mask * target_logp)
+        # Better compilation on IPU vs `tf.gather(logp, tokens, batch_dims=2)`
+        target_logp = batched_gather(logp, tokens)
+        return tf.reduce_sum(tf.cast(mask, target_logp.dtype) * -target_logp)
 
     def run(self, tokens: tf.Tensor, mask: tf.Tensor) -> Dict[str, tf.Tensor]:
         """Run the language model for cross entropy loss."""

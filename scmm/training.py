@@ -4,13 +4,13 @@ import dataclasses
 import datetime
 import itertools as it
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 
-import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 
 from . import datasets, models
+from .pedal import xpu
 
 
 @dataclass
@@ -19,21 +19,18 @@ class Settings:
 
     batch: datasets.BatchSettings
     steps: int
-    valid_interval: int
+    valid_interval: Optional[int]
     learning_rate: float
     beta_1: float = 0.9
     beta_2: float = 0.999
     optimiser: str = "adam"
 
 
-def evaluate(
-    model: models.Model, batches: Iterable[datasets.Batch]
-) -> Dict[str, float]:
-    """Evaluate a model."""
+def eval_summary(results: Iterable[datasets.Batch]) -> Dict[str, float]:
+    """Summarise evaluation results."""
 
     total_tokens, loss = 0, 0.0
-    for batch in batches:
-        result = model.run(**batch)
+    for result in results:
         n_tokens = int(result["n_tokens"])
         total_tokens += n_tokens
         loss += float(result["loss"]) * n_tokens
@@ -41,7 +38,7 @@ def evaluate(
 
 
 def train(
-    model: models.Model, data: datasets.Data, settings: Settings
+    model: models.Model, data: datasets.Data, context: xpu.Context, settings: Settings
 ) -> Iterable[Dict[str, Any]]:
     """Train a model."""
 
@@ -59,23 +56,19 @@ def train(
         return dict(kind=kind, step=step, time=datetime.datetime.now(), **data)
 
     def _validate(step: int) -> Iterable[Dict[str, Any]]:
-        valid_batches = data.batches(
-            "valid", dataclasses.replace(settings.batch, loop_seed=None)
-        )
-        yield _log(
-            "eval_valid",
-            step,
-            {f"valid_{k}": v for k, v in evaluate(model, valid_batches).items()},
-        )
-        train_batches = it.islice(
-            data.batches("train", settings.batch),
-            1 + data.parts["valid"].size // settings.batch.target_tokens,
-        )
-        yield _log(
-            "eval_train",
-            step,
-            {f"train_{k}": v for k, v in evaluate(model, train_batches).items()},
-        )
+        for part in ["valid", "train"]:
+            batch_settings = settings.batch
+            if part == "valid":
+                batch_settings = dataclasses.replace(batch_settings, loop_seed=None)
+            batches = data.batches(part, batch_settings)
+            if part == "train":
+                batches = it.islice(
+                    batches,
+                    1 + data.parts["valid"].size // settings.batch.target_tokens,
+                )
+            results = eval_summary(context.loop(model.run, batches))
+            results = {f"{part}_{k}": v for k, v in results.items()}
+            yield _log(f"eval_{part}", step, results)
 
     def _training_step(**batch: tf.Tensor) -> Dict[str, tf.Tensor]:
         with tf.GradientTape() as tape:
@@ -84,12 +77,15 @@ def train(
         optimiser.apply_gradients(zip(gradients, model.trainable_variables))
         return result
 
-    step = 0
-    for step, batch in enumerate(
-        it.islice(data.batches("train", settings.batch), settings.steps)
-    ):
-        if step % settings.valid_interval == 0:
+    train_steps = iter(
+        context.loop(_training_step, data.batches("train", settings.batch))
+    )
+    for step in it.count():
+        if step >= settings.steps:
+            if settings.valid_interval is not None:
+                yield from _validate(step)
+            break
+        if settings.valid_interval is not None and step % settings.valid_interval == 0:
             yield from _validate(step)
-        log = {k: np.array(v).tolist() for k, v in _training_step(**batch).items()}
-        yield _log("train_step", step, log)
-    yield from _validate(step + 1)
+        results = next(train_steps)  # pylint:disable=stop-iteration-return
+        yield _log("train_step", step, {k: v.tolist() for k, v in results.items()})

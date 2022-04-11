@@ -82,8 +82,8 @@ class Data:
             npad = settings.sequence_length - len(sequence)
             sequence = np.pad(sequence, ((0, npad),))
             mask = ((start - begin) <= idxs) & (idxs < (len(sequence) - npad))
-            batch_tokens.append(sequence)
-            batch_mask.append(mask)
+            batch_tokens.append(sequence.astype(np.int32))
+            batch_mask.append(mask.astype(np.int32))
             if settings.sequences <= len(batch_tokens):
                 yield dict(tokens=np.stack(batch_tokens), mask=np.stack(batch_mask))
                 batch_tokens.clear()

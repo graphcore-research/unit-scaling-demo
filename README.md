@@ -9,6 +9,8 @@ popenv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 ./dev
+
+python run_experiment.py
 ```
 
 ## Literature review

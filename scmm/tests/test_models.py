@@ -2,8 +2,19 @@ import dataclasses
 
 import numpy as np
 import pytest
+import tensorflow as tf
 
 from .. import models
+
+
+def test_batched_gather():
+    tables = tf.reshape(tf.range(2 * 3 * 4), (2, 3, 4))
+    indices = tf.constant([[0, 0, 3], [2, 2, 3]])
+    np.testing.assert_equal(
+        np.array(models.batched_gather(tables, indices)),
+        [[0 + 0, 4 + 0, 8 + 3], [12 + 2, 16 + 2, 20 + 3]],
+    )
+
 
 SETTINGS = models.Settings(
     vocab_size=100,

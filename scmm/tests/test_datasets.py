@@ -36,16 +36,16 @@ def test_data():
             batches = list(it.islice(data.batches(part, settings), max_batch))
             for batch in batches:
                 assert batch["tokens"].shape == settings.shape
-                assert batch["tokens"].dtype == np.uint16
+                assert batch["tokens"].dtype == np.int32
                 assert batch["mask"].shape == settings.shape
-                assert batch["mask"].dtype == np.bool
+                assert batch["mask"].dtype == np.int32
                 assert np.sum(batch["mask"]) >= (
                     1 if settings.loop_seed is None else settings.target_tokens
                 )
 
             if settings.loop_seed is None:
                 flat_tokens = np.ravel([b["tokens"] for b in batches])
-                flat_mask = np.ravel([b["mask"] for b in batches])
+                flat_mask = np.ravel([b["mask"] for b in batches]).astype(np.bool)
                 assert datasets.to_str(flat_tokens[flat_mask], vocab) == text
             else:
                 assert len(batches) == max_batch

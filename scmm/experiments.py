@@ -133,9 +133,9 @@ def run(settings: Settings) -> None:
     settings = copy.deepcopy(settings)
     settings.set_defaults(data)
 
-    # with xpu.context(settings.target) as context:
-    model = models.Model(settings.model)
-    with utility.logging(*_loggers(settings, model)) as log:
-        log(_settings_line(settings))
-        for item in training.train(model, data, settings.training):
-            log(item)
+    with xpu.context(settings.target) as context:
+        model = models.Model(settings.model)
+        with utility.logging(*_loggers(settings, model)) as log:
+            log(_settings_line(settings))
+            for item in training.train(model, data, context, settings.training):
+                log(item)
