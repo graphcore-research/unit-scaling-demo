@@ -17,21 +17,29 @@ from . import datasets, models, training
 from .pedal import utility, xpu
 
 
-def log_wandb(item: Dict[str, Any]) -> None:
+@contextlib.contextmanager
+def log_wandb() -> Generator[utility.Logger, None, None]:
     """Log to weights & biases."""
-    if item["kind"] == "settings":
-        Path("out").mkdir(exist_ok=True, parents=True)
-        wandb.init(
-            config=utility.remove_keys(item, "kind"),
-            dir="out",
-            project="scaled-matmuls",
-        )
-    elif item["kind"] == "stats":
-        wandb.run.summary.update(  # type:ignore[union-attr]
-            utility.remove_keys(item, "kind")
-        )
-    else:
-        wandb.log(utility.remove_keys(item, "step"), step=item["step"])
+
+    def _log(item: Dict[str, Any]) -> None:
+        if item["kind"] == "settings":
+            Path("out").mkdir(exist_ok=True, parents=True)
+            wandb.init(
+                config=utility.remove_keys(item, "kind"),
+                dir="out",
+                project="scaled-matmuls",
+            )
+        elif item["kind"] == "stats":
+            wandb.run.summary.update(  # type:ignore[union-attr]
+                utility.remove_keys(item, "kind")
+            )
+        else:
+            wandb.log(utility.remove_keys(item, "step"), step=item["step"])
+
+    yield _log
+
+    # Otherwise we hang (when started in a subprocess from a sweep)
+    wandb.finish()
 
 
 @contextlib.contextmanager
@@ -115,7 +123,7 @@ class Settings:
 def _loggers(settings: Settings, model: models.Model) -> Iterable[utility.Logger]:
     yield log_stderr
     if settings.output.wandb:
-        yield log_wandb
+        yield log_wandb()
     if settings.output.log:
         yield log_jsonl(settings.output.log)
     if settings.output.checkpoint:

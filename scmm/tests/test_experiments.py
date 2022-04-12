@@ -40,12 +40,13 @@ def _test_settings(path: Path) -> experiments.Settings:
     )
 
 
-def test_run_experiment(tmp_path: Path):
+def test_run_experiment(tmp_path: Path):  # pylint:disable=too-many-locals
 
     with contextlib.ExitStack() as stack:
         wandb_init = stack.enter_context(um.patch("wandb.init"))
         wandb_log = stack.enter_context(um.patch("wandb.log"))
         stack.enter_context(um.patch("wandb.run"))
+        wandb_finish = stack.enter_context(um.patch("wandb.finish"))
         stack.enter_context(
             um.patch.dict(
                 os.environ, {"SSUB_UID": "ssub123", "SLURM_JOB_ID": "slurm123"}
@@ -59,6 +60,7 @@ def test_run_experiment(tmp_path: Path):
     assert wandb_init_args.get("project") == "scaled-matmuls"
     assert wandb_init_args["config"]["metadata"]["ssub_id"] == "ssub123"
     assert wandb_log.call_count == 100 + 2 * 3
+    wandb_finish.assert_called_once()
 
     # Checkpoint
     checkpoint = np.load(tmp_path / "model.npz")
