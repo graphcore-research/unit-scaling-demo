@@ -1,12 +1,13 @@
 """Core model definitions."""
 
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Iterator, Tuple
 
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 
+from . import layers
 from .pedal import utility
 
 
@@ -14,12 +15,27 @@ from .pedal import utility
 class Settings:
     """Model configuration."""
 
+    seed: int
     vocab_size: int
     hidden_size: int
     depth: int
     kernel_size: int
-    seed: int
+
+
+@dataclass
+class SimpleConv(Settings):
+    """A stack of causual convolutions with relu nonlinearity."""
+
     kind: str = "simple_conv"
+
+
+@dataclass
+class ResidualConv(Settings):
+    """A prenorm stack of causal grouped convolutions and pointwise FFNs."""
+
+    group_size: int
+    ffn_multiple: float
+    kind: str = "residual_conv"
 
 
 def _built(layer: keras.layers.Layer, shape: Tuple[int, ...]) -> keras.layers.Layer:
@@ -28,14 +44,50 @@ def _built(layer: keras.layers.Layer, shape: Tuple[int, ...]) -> keras.layers.La
     return layer
 
 
-def batched_gather(tables: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:
-    """Simulate tf.gather(tables, indices, batch_dims=indices.ndim)."""
-    assert len(tables.shape) == len(indices.shape) + 1
-    offsets = (
-        np.arange(np.prod(indices.shape)).reshape(indices.shape) * tables.shape[-1]
-    )
-    values = tf.gather(tf.reshape(tables, (-1,)), tf.reshape(indices + offsets, (-1,)))
-    return tf.reshape(values, indices.shape)
+class _SimpleConvLayer(keras.layers.Conv1D):  # type:ignore[misc]
+    def __init__(self, settings: SimpleConv, seeds: Iterator[int]):
+        super().__init__(
+            settings.hidden_size,
+            kernel_size=settings.kernel_size,
+            padding="causal",
+            kernel_initializer=keras.initializers.GlorotUniform(seed=next(seeds)),
+        )
+
+    def call(self, x: tf.Tensor) -> tf.Tensor:
+        return tf.nn.relu(super().call(x))
+
+
+class _ResidualConvLayer(keras.layers.Layer):  # type:ignore[misc]
+    def __init__(self, settings: ResidualConv, seeds: Iterator[int]):
+        super().__init__()
+        self.conv = layers.PreNormResidualLayer(
+            keras.layers.Conv1D(
+                settings.hidden_size,
+                kernel_size=settings.kernel_size,
+                groups=settings.hidden_size // settings.group_size,
+                padding="causal",
+                kernel_initializer=keras.initializers.GlorotUniform(seed=next(seeds)),
+            )
+        )
+        self.ffn = layers.PreNormResidualLayer(
+            layers.FFNLayer(settings.ffn_multiple, seeds=(next(seeds), next(seeds)))
+        )
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        self.conv.build(input_shape)
+        self.ffn.build(input_shape)
+
+    def call(self, x: tf.Tensor) -> tf.Tensor:
+        x = self.conv(x)
+        return self.ffn(x)
+
+
+def _create(settings: Settings, seeds: Iterator[int]) -> keras.layers.Layer:
+    if isinstance(settings, SimpleConv):
+        return _SimpleConvLayer(settings, seeds)
+    if isinstance(settings, ResidualConv):
+        return _ResidualConvLayer(settings, seeds)
+    assert False, f"Unexpected models settings type {type(settings)}"
 
 
 class Model(keras.layers.Layer):  # type:ignore[misc]
@@ -54,18 +106,8 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
             ),
             (),
         )
-        self.convs = [
-            _built(
-                keras.layers.Conv1D(
-                    settings.hidden_size,
-                    kernel_size=settings.kernel_size,
-                    padding="causal",
-                    kernel_initializer=keras.initializers.GlorotUniform(
-                        seed=next(seeds)
-                    ),
-                ),
-                (settings.hidden_size,),
-            )
+        self.trunk = [
+            _built(_create(settings, seeds), (settings.hidden_size,))
             for _ in range(settings.depth)
         ]
         self.predict = _built(
@@ -121,14 +163,14 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
     def _total_loss(scores: tf.Tensor, tokens: tf.Tensor, mask: tf.Tensor) -> tf.Tensor:
         logp = tf.nn.log_softmax(scores)
         # Better compilation on IPU vs `tf.gather(logp, tokens, batch_dims=2)`
-        target_logp = batched_gather(logp, tokens)
+        target_logp = layers.batched_gather(logp, tokens)
         return tf.reduce_sum(tf.cast(mask, target_logp.dtype) * -target_logp)
 
     def run(self, tokens: tf.Tensor, mask: tf.Tensor) -> Dict[str, tf.Tensor]:
         """Run the language model for cross entropy loss."""
         hiddens = self.embed(tokens)
-        for conv in self.convs:
-            hiddens = tf.nn.relu(conv(hiddens))
+        for layer in self.trunk:
+            hiddens = layer(hiddens)
         scores = self._shift_predictions(self.predict(hiddens))
         loss = self._total_loss(scores, tokens, mask)
         n_tokens = tf.reduce_sum(tf.cast(mask, tf.int32))

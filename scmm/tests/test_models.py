@@ -2,45 +2,44 @@ import dataclasses
 
 import numpy as np
 import pytest
-import tensorflow as tf
 
 from .. import models
 
-
-def test_batched_gather():
-    tables = tf.reshape(tf.range(2 * 3 * 4), (2, 3, 4))
-    indices = tf.constant([[0, 0, 3], [2, 2, 3]])
-    np.testing.assert_equal(
-        np.array(models.batched_gather(tables, indices)),
-        [[0 + 0, 4 + 0, 8 + 3], [12 + 2, 16 + 2, 20 + 3]],
-    )
-
-
-SETTINGS = models.Settings(
+SIMPLE_SETTINGS = models.SimpleConv(
+    seed=100,
     vocab_size=100,
     hidden_size=8,
     depth=2,
     kernel_size=5,
+)
+RESIDUAL_SETTINGS = models.ResidualConv(
     seed=100,
+    vocab_size=100,
+    hidden_size=8,
+    depth=2,
+    kernel_size=5,
+    group_size=4,
+    ffn_multiple=1.5,
 )
 
 
-def test_model():
+@pytest.mark.parametrize("settings", [SIMPLE_SETTINGS, RESIDUAL_SETTINGS])
+def test_model(settings: models.Settings):
     batch_sequences = 3
     sequence_length = 12
     random = np.random.Generator(np.random.PCG64(200))
     tokens = random.integers(
-        SETTINGS.vocab_size, size=(batch_sequences, sequence_length)
+        settings.vocab_size, size=(batch_sequences, sequence_length)
     )
     mask = random.random(size=(batch_sequences, sequence_length)) < 0.9
 
-    model = models.Model(SETTINGS)
+    model = models.Model(settings)
     result = model.run(tokens=tokens, mask=mask)
-    assert 0 < float(result["loss"]) < 1.5 * np.log(SETTINGS.vocab_size)
+    assert 0 < float(result["loss"]) < 1.5 * np.log(settings.vocab_size)
     assert int(result["n_tokens"]) == np.sum(mask)
 
     # Same seed - expect same weights & results
-    model2 = models.Model(SETTINGS)
+    model2 = models.Model(settings)
     result2 = model2.run(tokens=tokens, mask=mask)
     np.testing.assert_allclose(float(result2["loss"]), float(result["loss"]))
     np.testing.assert_equal(model2.save(), model.save())
@@ -48,8 +47,10 @@ def test_model():
 
 def test_model_load_save():
     # Change seed, expect different weights
-    base = models.Model(SETTINGS)
-    other = models.Model(dataclasses.replace(SETTINGS, seed=SETTINGS.seed + 1))
+    base = models.Model(SIMPLE_SETTINGS)
+    other = models.Model(
+        dataclasses.replace(SIMPLE_SETTINGS, seed=SIMPLE_SETTINGS.seed + 1)
+    )
     base_weights = base.save()
     other_weights = other.save()
     assert any(np.any(other_weights[k] != base_weights[k]) for k in base_weights)

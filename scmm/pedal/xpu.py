@@ -62,6 +62,7 @@ class IpuSettings:
     """IPU-specific settings."""
 
     iterations_per_loop: int
+    available_memory_proportion: Optional[float] = None
 
     type: str = "ipu"
 
@@ -148,6 +149,10 @@ if IPU:
     def _create_ipu_context(settings: IpuSettings) -> Context:
         config = ipu.config.IPUConfig()
         config.auto_select_ipus = 1
+        if settings.available_memory_proportion is not None:
+            config.matmuls.poplar_options["availableMemoryProportion"] = str(
+                settings.available_memory_proportion
+            )
         ipu.utils.configure_ipu_system(config)
         return Context(
             ipu.ipu_strategy.IPUStrategy(),
