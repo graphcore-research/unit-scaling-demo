@@ -33,8 +33,10 @@ def log_wandb() -> Generator[utility.Logger, None, None]:
             wandb.run.summary.update(  # type:ignore[union-attr]
                 utility.remove_keys(item, "kind")
             )
+        elif item["kind"] == "train_step":
+            pass  # skip training steps (too large)
         else:
-            wandb.log(utility.remove_keys(item, "step"), step=item["step"])
+            wandb.log(item, step=item["step"])
 
     yield _log
 

@@ -59,7 +59,7 @@ def test_run_experiment(tmp_path: Path):  # pylint:disable=too-many-locals
     wandb_init_args = wandb_init.call_args[1]
     assert wandb_init_args.get("project") == "scaled-matmuls"
     assert wandb_init_args["config"]["metadata"]["ssub_id"] == "ssub123"
-    assert wandb_log.call_count == 100 + 2 * 3
+    assert wandb_log.call_count == 2 * 3
     wandb_finish.assert_called_once()
 
     # Checkpoint
