@@ -5,29 +5,34 @@ import dataclasses
 
 import scmm as S
 
-# profile = Path("out/profile")
+# profile = Path("out/profiles/dev")
 profile = None
 
 
 settings = S.experiments.Settings(
-    data=S.experiments.DataSettings(Path("data/wikitext103_raw")),
-    model=S.models.Settings(
-        hidden_size=128, depth=1, kernel_size=5, vocab_size=None, seed=None
+    # data=S.experiments.DataSettings(Path("scmm/tests/data"), kind="test"),
+    data=S.experiments.DataSettings(Path("/home/research-datasets/wikitext103_raw")),
+    model=S.models.ResidualConv(
+        vocab_size=None,
+        seed=None,
+        hidden_size=128,
+        depth=4,
+        kernel_size=7,
+        ffn_multiple=2,
+        group_size=32,
     ),
     training=S.training.Settings(
         batch=S.datasets.BatchSettings(
-            sequences=4, sequence_length=128, overlap_length=16, loop_seed=None
+            sequences=8, sequence_length=256, overlap_length=32, loop_seed=None
         ),
-        steps=int(2e3),
-        valid_interval=int(1e3),
-        learning_rate=1e-2,
+        steps=int(1e5),
+        valid_interval=int(1e4),
+        learning_rate=1e-3,
     ),
-    # target=S.pedal.xpu.CpuSettings(compile=False),
-    target=S.pedal.xpu.IpuSettings(iterations_per_loop=100),
-    output=S.experiments.OutputSettings(
-        wandb=False, log=Path("out/dev.jsonl"), checkpoint=None
-    ),
-    metadata=dict(experiment="dev"),
+    # target=S.pedal.xpu.CpuSettings(),
+    target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(1e3)),
+    output=S.experiments.OutputSettings(wandb=True, log=None, checkpoint=None),
+    metadata=dict(experiment="dev_residual_conv"),
     seed=None,
 )
 
@@ -51,7 +56,14 @@ if profile:
         data=S.experiments.DataSettings(Path("scmm/tests/data")),
         model=dataclasses.replace(settings.model, vocab_size=5008),
         training=dataclasses.replace(settings.training, steps=1, valid_interval=None),
-        output=S.experiments.OutputSettings(wandb=False, log=None, checkpoint=None),
+        target=dataclasses.replace(settings.target, iterations_per_loop=int(1)),
+        output=S.experiments.OutputSettings(
+            wandb=False, log=profile / "log.jsonl", checkpoint=None
+        ),
     )
+else:
+    os.environ[
+        "TF_POPLAR_FLAGS"
+    ] = f"--executable_cache_path=/a/scratch/{os.environ['USER']}_research/tmp/cache"
 
 S.experiments.run(settings)
