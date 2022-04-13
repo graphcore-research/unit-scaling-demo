@@ -1,0 +1,15 @@
+project: scaled-matmuls
+sdk: 2.6.0-EA.1+930
+exclude:
+  - .git
+  - .mypy_cache
+  - .mypy_cache_tests
+  - .venv
+  - .venvs
+  - data
+  - local
+  - out
+save:
+  - out
+popenv_args:
+  --tf: 2
