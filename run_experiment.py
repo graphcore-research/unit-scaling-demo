@@ -8,7 +8,7 @@ import scmm as S
 # profile = Path("out/profiles/dev")
 profile = None
 
-
+# ssub -t mk2 -n 1 -- python run_experiment.py
 settings = S.experiments.Settings(
     # data=S.experiments.DataSettings(Path("scmm/tests/data"), kind="test"),
     data=S.experiments.DataSettings(Path("/home/research-datasets/wikitext103_raw")),
@@ -18,14 +18,14 @@ settings = S.experiments.Settings(
         hidden_size=128,
         depth=4,
         kernel_size=7,
-        ffn_multiple=2,
-        group_size=32,
+        ffn_multiple=4,
+        group_size=64,
     ),
     training=S.training.Settings(
         batch=S.datasets.BatchSettings(
             sequences=8, sequence_length=256, overlap_length=32, loop_seed=None
         ),
-        steps=int(1e5),
+        steps=int(1e6),
         valid_interval=int(1e4),
         learning_rate=1e-3,
     ),
