@@ -38,10 +38,11 @@ def log_wandb() -> Generator[utility.Logger, None, None]:
         else:
             wandb.log(item, step=item["step"])
 
-    yield _log
-
-    # Otherwise we hang (when started in a subprocess from a sweep)
-    wandb.finish()
+    try:
+        yield _log
+    finally:
+        # Otherwise we hang (when started in a subprocess from a sweep)
+        wandb.finish()
 
 
 @contextlib.contextmanager
