@@ -1,7 +1,7 @@
 """Core model definitions."""
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterator, Tuple
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
@@ -38,7 +38,9 @@ class ResidualConv(Settings):
     kind: str = "residual_conv"
 
 
-def _built(layer: keras.layers.Layer, shape: Tuple[int, ...]) -> keras.layers.Layer:
+def _built(
+    layer: keras.layers.Layer, shape: Tuple[Optional[int], ...]
+) -> keras.layers.Layer:
     """Build a layer and return it."""
     layer.build(shape)
     return layer
@@ -82,7 +84,7 @@ class _ResidualConvLayer(keras.layers.Layer):  # type:ignore[misc]
         return self.ffn(x)
 
 
-def _create(settings: Settings, seeds: Iterator[int]) -> keras.layers.Layer:
+def _create_trunk(settings: Settings, seeds: Iterator[int]) -> keras.layers.Layer:
     if isinstance(settings, SimpleConv):
         return _SimpleConvLayer(settings, seeds)
     if isinstance(settings, ResidualConv):
@@ -96,6 +98,7 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
     def __init__(self, settings: Settings):
         super().__init__()
         seeds = iter(utility.split_seed(settings.seed, 1000))  # plenty of seeds
+        shape = (None, None, settings.hidden_size)
         self.embed = _built(
             keras.layers.Embedding(
                 settings.vocab_size,
@@ -107,15 +110,15 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
             (),
         )
         self.trunk = [
-            _built(_create(settings, seeds), (settings.hidden_size,))
-            for _ in range(settings.depth)
+            _built(_create_trunk(settings, seeds), shape) for _ in range(settings.depth)
         ]
+        self.norm = _built(keras.layers.LayerNormalization(), shape)
         self.predict = _built(
             keras.layers.Dense(
                 settings.vocab_size,
                 kernel_initializer=keras.initializers.GlorotUniform(seed=next(seeds)),
             ),
-            shape=(settings.hidden_size,),
+            shape,
         )
         self.predict_padding = self.add_weight(
             name="predict_padding",
@@ -171,7 +174,7 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
         hiddens = self.embed(tokens)
         for layer in self.trunk:
             hiddens = layer(hiddens)
-        scores = self._shift_predictions(self.predict(hiddens))
+        scores = self._shift_predictions(self.predict(self.norm(hiddens)))
         loss = self._total_loss(scores, tokens, mask)
         n_tokens = tf.reduce_sum(tf.cast(mask, tf.int32))
         return dict(loss=loss / tf.cast(n_tokens, loss.dtype), n_tokens=n_tokens)
