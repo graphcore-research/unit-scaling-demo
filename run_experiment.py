@@ -7,6 +7,8 @@ import scmm as S
 
 # profile = Path("out/profiles/dev")
 profile = None
+# out = Path("out/models/dev")
+out = None
 
 # ssub -t mk2 -n 1 -- python run_experiment.py
 settings = S.experiments.Settings(
@@ -16,10 +18,10 @@ settings = S.experiments.Settings(
         vocab_size=None,
         seed=None,
         hidden_size=128,
-        depth=4,
-        kernel_size=7,
+        depth=8,
+        kernel_size=5,
         ffn_multiple=4,
-        group_size=64,
+        group_size=16,
     ),
     training=S.training.Settings(
         batch=S.datasets.BatchSettings(
@@ -31,8 +33,10 @@ settings = S.experiments.Settings(
     ),
     # target=S.pedal.xpu.CpuSettings(),
     target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(1e3)),
-    output=S.experiments.OutputSettings(wandb=True, log=None, checkpoint=None),
-    metadata=dict(experiment="dev_residual_conv"),
+    output=S.experiments.OutputSettings(
+        wandb=True, log=out and out / "log.jsonl", checkpoint=out and out / "model.npz"
+    ),
+    metadata=dict(experiment="dev"),
     seed=None,
 )
 
