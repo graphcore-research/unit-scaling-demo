@@ -89,19 +89,26 @@ def logging(
         yield apply
 
 
-def named_weights(
+def named_layers(
     layer: Union[keras.layers.Layer, Sequence[keras.layers.Layer]],
     prefix: Tuple[str, ...] = (),
-) -> Iterable[Tuple[str, tf.Variable]]:
-    """Walk a layer, recursively trying to find weight variables."""
+) -> Iterable[Tuple[str, keras.layers.Layer]]:
+    """Walk a layer, recursively trying to find sublayers."""
     if isinstance(layer, (list, tuple)):
         for n, child in enumerate(layer):
-            yield from named_weights(child, prefix + (str(n),))
+            yield from named_layers(child, prefix + (str(n),))
     if isinstance(layer, keras.layers.Layer):
+        yield (".".join(prefix), layer)
         for attr, child in vars(layer).items():
             if attr.startswith("_"):
                 continue
             if isinstance(child, (list, tuple, keras.layers.Layer)):
-                yield from named_weights(child, prefix + (attr,))
-            if isinstance(child, tf.Variable):
-                yield (".".join(prefix + (attr,)), child)
+                yield from named_layers(child, prefix + (attr,))
+
+
+def named_weights(layer: keras.layers.Layer) -> Iterable[Tuple[str, tf.Variable]]:
+    """Walk a layer, recursively trying to find weight variables."""
+    for name, sublayer in named_layers(layer):
+        for attr, child in vars(sublayer).items():
+            if not attr.startswith("_") and isinstance(child, tf.Variable):
+                yield (f"{name}.{attr}" if name else attr, child)

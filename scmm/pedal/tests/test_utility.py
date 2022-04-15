@@ -51,8 +51,8 @@ def test_logging():
     assert history == ["pre", 123, "lambda 123", 456, "lambda 456", "post"]
 
 
-def test_named_weights():
-    class Model(keras.layers.Layer):
+def test_named_layers_and_weights():
+    class TestModel(keras.layers.Layer):
         def __init__(self):
             super().__init__()
             self.projection = keras.layers.Dense(20)
@@ -64,7 +64,16 @@ def test_named_weights():
             for transform in self.transforms:
                 transform.build((20,))
 
-    assert {k: tuple(v.shape) for k, v in utility.named_weights(Model())} == {
+    model = TestModel()
+
+    assert {k: type(v).__name__ for k, v in utility.named_layers(model)} == {
+        "": "TestModel",
+        "projection": "Dense",
+        "transforms.0": "LayerNormalization",
+        "transforms.1": "Dense",
+    }
+
+    assert {k: tuple(v.shape) for k, v in utility.named_weights(model)} == {
         "projection.kernel": (10, 20),
         "projection.bias": (20,),
         "transforms.0.beta": (20,),
