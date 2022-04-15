@@ -26,6 +26,7 @@ class PreNormResidualLayer(keras.layers.Layer):  # type:ignore[misc]
         self.body = body
 
     def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
         self.norm.build(input_shape)
         self.body.build(input_shape)
 
@@ -44,8 +45,7 @@ class FFNLayer(keras.layers.Layer):  # type:ignore[misc]
         self.down: Optional[keras.layers.Layer] = None
 
     def build(self, input_shape: tf.TensorShape) -> None:
-        if self.up is not None:
-            return  # build() can be called multiple times
+        super().build(input_shape)
         hidden_size = input_shape[-1]
         intermediate_size = int(self.multiple * hidden_size)
         self.up = keras.layers.Dense(

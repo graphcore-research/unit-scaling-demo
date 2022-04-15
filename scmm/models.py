@@ -76,6 +76,7 @@ class _ResidualConvLayer(keras.layers.Layer):  # type:ignore[misc]
         )
 
     def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
         self.conv.build(input_shape)
         self.ffn.build(input_shape)
 
@@ -97,6 +98,7 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
 
     def __init__(self, settings: Settings):
         super().__init__()
+        self.settings = settings
         seeds = iter(utility.split_seed(settings.seed, 1000))  # plenty of seeds
         shape = (None, None, settings.hidden_size)
         self.embed = _built(

@@ -63,6 +63,9 @@ def test_named_layers_and_weights():
             ]
             for transform in self.transforms:
                 transform.build((20,))
+            self.final_bias = self.add_weight(
+                name="final_bias", shape=(7,), initializer="zeros"
+            )
 
     model = TestModel()
 
@@ -79,4 +82,6 @@ def test_named_layers_and_weights():
         "transforms.0.beta": (20,),
         "transforms.0.gamma": (20,),
         "transforms.1.kernel": (20, 20),
+        "final_bias": (7,),
     }
+    assert dict(utility.named_weights(model, recursive=False)).keys() == {"final_bias"}

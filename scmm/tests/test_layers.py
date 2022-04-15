@@ -16,14 +16,13 @@ def test_batched_gather():
 
 def test_pre_norm_residual_layer():
     layer = layers.PreNormResidualLayer(keras.layers.Dense(7))
-    layer.build((7,))
+    layer.build((None, None, 7))
     assert layer.body.kernel.shape == (7, 7)
     assert layer(tf.ones((2, 3, 7))).shape == (2, 3, 7)
 
 
 def test_ffn_layer():
     layer = layers.FFNLayer(3, (100, 200))
-    layer.build((7,))
     layer.build((7,))
     assert layer.up.kernel.shape == (7, 21)  # type:ignore[union-attr]
     assert layer.down.kernel.shape == (21, 7)  # type:ignore[union-attr]
