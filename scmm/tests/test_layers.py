@@ -24,6 +24,7 @@ def test_pre_norm_residual_layer():
 def test_ffn_layer():
     layer = layers.FFNLayer(3, (100, 200))
     layer.build((7,))
+    layer.build((7,))
     assert layer.up.kernel.shape == (7, 21)  # type:ignore[union-attr]
     assert layer.down.kernel.shape == (21, 7)  # type:ignore[union-attr]
     assert layer(tf.ones((2, 3, 7))).shape == (2, 3, 7)
