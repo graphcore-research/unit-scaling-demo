@@ -106,7 +106,7 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
                 settings.vocab_size,
                 settings.hidden_size,
                 embeddings_initializer=keras.initializers.RandomUniform(
-                    seed=next(seeds)
+                    minval=-np.sqrt(3), maxval=np.sqrt(3), seed=next(seeds)
                 ),
             ),
             (),
