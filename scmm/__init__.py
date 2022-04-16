@@ -1,3 +1,11 @@
 """Scaled matmuls experimentation."""
 
-from . import datasets, experiments, layers, models, pedal, training  # NOQA: F401
+from . import (  # NOQA: F401
+    datasets,
+    experiments,
+    layers,
+    models,
+    pedal,
+    training,
+    uscale,
+)
