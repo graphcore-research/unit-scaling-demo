@@ -11,6 +11,9 @@ from tensorflow import keras
 
 from .pedal import utility
 
+###############################################################################
+# Utility
+
 
 class ActivationTracker:
     """Track activations (and gradients) for layers in a model.
@@ -132,4 +135,125 @@ class ActivationTracker:
                 ),
             )
             for layer_name in self._activations  # forward pass ordering
+        )
+
+
+###############################################################################
+# Ops
+
+
+@tf.custom_gradient  # type:ignore[misc]
+def scaling(
+    input: tf.Tensor,  # pylint:disable=redefined-builtin
+    *,
+    forward: Optional[float] = None,
+    backward: Optional[float] = None,
+) -> tf.Tensor:
+    """Perform arbitary *seperate* scaling in the forward and backward passes."""
+
+    def grad(upstream: tf.Tensor) -> tf.Tensor:
+        grad_input = upstream
+        if backward is not None:
+            grad_input *= backward
+        return grad_input
+
+    output = input
+    if forward is not None:
+        output *= forward
+
+    return output, grad
+
+
+def matmul(a: tf.Tensor, b: tf.Tensor) -> tf.Tensor:
+    """Scaling version of tf.matmul (where b must be 2D)."""
+    assert len(b.shape) == 2, "matmul requires 2D rhs (argument `b`)"
+
+    input_size, output_size = b.shape
+    batch_size = np.prod(a.shape[:-1])
+
+    a = scaling(a, backward=output_size**-0.5)
+    b = scaling(b, backward=batch_size**-0.5)
+    return scaling(a @ b, forward=input_size**-0.5)
+
+
+def conv1d(
+    input: tf.Tensor,  # pylint:disable=redefined-builtin
+    filters: tf.Tensor,
+    padding: str,
+) -> tf.Tensor:
+    """Scaling version of tf.nn.conv1d."""
+    *batch_shape, input_length, input_size = input.shape
+    filter_width, filter_input_size, output_size = filters.shape
+
+    output_length = dict(
+        SAME=input_length,
+        VALID=input_length + 1 - filter_width,
+    )[padding]
+    n_groups = input_size // filter_input_size
+    batch_size = np.prod(batch_shape)
+
+    input = scaling(
+        input,
+        backward=(filter_width * output_length / input_length * output_size // n_groups)
+        ** -0.5,
+    )
+    filters = scaling(filters, backward=(output_length * batch_size) ** -0.5)
+    output = tf.nn.conv1d(input, filters, stride=1, padding=padding)
+    return scaling(output, forward=(filter_width * input_size // n_groups) ** -0.5)
+
+
+def relu(features: tf.Tensor) -> tf.Tensor:
+    """A scaled ReLU nonlinearity."""
+    return scaling(
+        tf.nn.relu(features),
+        forward=np.sqrt(2) / np.sqrt(1 - 1 / np.pi),
+        backward=np.sqrt(2),
+    )
+
+
+###############################################################################
+# Layers
+
+
+class Initializers:
+    """Unit-variance initializers."""
+
+    @staticmethod
+    def uniform(seed: Optional[int]) -> keras.initializers.Initializer:
+        """Uniform distribution (symmetric about 0)."""
+        return keras.initializers.RandomUniform(-np.sqrt(3), np.sqrt(3), seed=seed)
+
+    @staticmethod
+    def normal(seed: Optional[int]) -> keras.initializers.Initializer:
+        """Standard normal distribution."""
+        return keras.initializers.RandomNormal(stddev=1, seed=seed)
+
+
+class Dense(keras.layers.Layer):  # type:ignore[misc]
+    """A scaled (and more restrictive) version of keras.layers.Dense."""
+
+    def __init__(self, units: int, seed: Optional[int] = None):
+        super().__init__(self)
+        self.units = units
+        self.kernel: tf.Variable = None
+        self.kernel_initializer = Initializers.uniform(seed)
+        self.bias: tf.Variable = None
+        self.bias_initializer = keras.initializers.zeros()
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        self.kernel = self.add_weight(
+            "kernel",
+            shape=(input_shape[-1], self.units),
+            initializer=self.kernel_initializer,
+        )
+        self.bias = self.add_weight(
+            "bias",
+            shape=self.units,
+            initializer=self.bias_initializer,
+        )
+
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        return matmul(inputs, self.kernel) + scaling(
+            self.bias, backward=np.prod(inputs.shape[:-1]) ** -0.5
         )
