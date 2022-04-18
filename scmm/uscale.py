@@ -9,6 +9,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 
+from . import layers
 from .pedal import utility
 
 ###############################################################################
@@ -154,7 +155,14 @@ def scaling(
     def grad(upstream: tf.Tensor) -> tf.Tensor:
         grad_input = upstream
         if backward is not None:
-            grad_input *= backward
+            if isinstance(upstream, tf.IndexedSlices):
+                grad_input = tf.IndexedSlices(
+                    values=upstream.values * backward,
+                    indices=upstream.indices,
+                    dense_shape=upstream.dense_shape,
+                )
+            else:
+                grad_input *= backward
         return grad_input
 
     output = input
@@ -211,6 +219,36 @@ def relu(features: tf.Tensor) -> tf.Tensor:
     )
 
 
+def add_bias(features: tf.Tensor, bias: tf.Tensor) -> tf.Tensor:
+    """Add a bias (which should be zero-initialized), with a scaled backward pass."""
+    assert len(bias.shape) == 1, "bias should be 1D"
+    batch_size = np.prod(features.shape[:-1])
+    return features + scaling(bias, backward=batch_size**-0.5)
+
+
+def softmax_cross_entropy(
+    scores: tf.Tensor, ids: tf.Tensor, mask: tf.Tensor
+) -> Tuple[tf.Tensor, tf.Tensor]:
+    """Compute masked softmax cross entropy loss.
+
+    Note that we abandon unit scaling in the forward pass, since this is
+    designed as a final loss term.
+
+    returns -- (average_loss, n_items)
+    """
+    logp = tf.nn.log_softmax(scores)
+    # Better compilation on IPU vs `tf.gather(logp, ids, batch_dims=2)`
+    target_logp = layers.batched_gather(logp, ids)
+    total_loss = tf.reduce_sum(tf.cast(mask, target_logp.dtype) * -target_logp)
+    n_ids = tf.reduce_sum(tf.cast(mask, tf.int32))
+    n_classes = scores.shape[1]
+    loss = scaling(
+        total_loss / tf.cast(n_ids, total_loss.dtype),
+        backward=np.prod(mask.shape) * n_classes / np.sqrt(n_classes - 1),
+    )
+    return loss, n_ids
+
+
 ###############################################################################
 # Layers
 
@@ -254,6 +292,87 @@ class Dense(keras.layers.Layer):  # type:ignore[misc]
         )
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
-        return matmul(inputs, self.kernel) + scaling(
-            self.bias, backward=np.prod(inputs.shape[:-1]) ** -0.5
+        return add_bias(matmul(inputs, self.kernel), self.bias)
+
+
+class CausalConv1D(keras.layers.Layer):  # type:ignore[misc]
+    """A scaled causal 1D convolution."""
+
+    def __init__(
+        self,
+        filters: int,
+        kernel_size: int,
+        groups: Optional[int] = None,
+        seed: Optional[int] = None,
+    ):
+        super().__init__()
+        self.filters = filters
+        self.kernel_size = kernel_size
+        self.groups = groups or 1
+        if filters % self.groups != 0:
+            raise ValueError(
+                f"Filters ({filters}) must be evenly divisible by groups ({self.groups})"
+            )
+        self.kernel: tf.Variable = None
+        self.kernel_initializer = Initializers.uniform(seed)
+        self.bias: tf.Variable = None
+        self.bias_initializer = keras.initializers.zeros()
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        input_features = input_shape[-1]
+        if input_features % self.groups != 0:
+            raise ValueError(
+                f"Input feature size ({input_features}) must be evenly divisible"
+                f" by groups ({self.groups})"
+            )
+        self.kernel = self.add_weight(
+            "kernel",
+            shape=(self.kernel_size, input_shape[-1] // self.groups, self.filters),
+            initializer=self.kernel_initializer,
+        )
+        self.bias = self.add_weight(
+            "bias", shape=self.filters, initializer=self.bias_initializer
+        )
+
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        padded = tf.pad(
+            inputs,
+            [(0, 0), (self.kernel_size - 1, 0), (0, 0)],
+        )
+        length = inputs.shape[1]
+        # Scaling here to account for zero-padding
+        outputs = scaling(
+            conv1d(padded, self.kernel, padding="VALID"),
+            forward=(length / (length + (1 - self.kernel_size) / 2)) ** 0.5,
+        )
+        return add_bias(outputs, self.bias)
+
+
+class Embedding(keras.layers.Layer):  # type:ignore[misc]
+    """A scaled embedding layer."""
+
+    def __init__(
+        self, table_size: int, embeddings_size: int, seed: Optional[int] = None
+    ):
+        super().__init__()
+        self.table_size = table_size
+        self.embeddings_size = embeddings_size
+        self.embeddings: tf.Variable = None
+        self.embeddings_initializer = Initializers.uniform(seed)
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        self.embeddings = self.add_weight(
+            "embeddings",
+            shape=(self.table_size, self.embeddings_size),
+            initializer=self.embeddings_initializer,
+        )
+
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        # We don't need to worry about inputs scaling, as it is non-differentiable
+        batch_size = np.prod(inputs.shape)
+        return tf.gather(
+            scaling(self.embeddings, backward=(self.table_size / batch_size) ** 0.5),
+            inputs,
         )

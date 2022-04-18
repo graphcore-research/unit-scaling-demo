@@ -100,6 +100,11 @@ def assert_unit_scale(value: np.ndarray, tol: float, err_msg: str = "") -> None:
     np.testing.assert_allclose(np.std(value), 1, atol=tol, err_msg=err_msg)
 
 
+def assert_all_unit_scale(values: Dict[str, np.ndarray], tol: float) -> None:
+    for k in values:
+        assert_unit_scale(values[k], tol=tol, err_msg=f"for {k}")
+
+
 def check_op(
     scaled: Callable[..., tf.Tensor],
     reference: Callable[..., tf.Tensor],
@@ -155,6 +160,19 @@ def test_op_conv1d():
         )
 
 
+def test_op_softmax_cross_entropy():
+    random = np.random.Generator(np.random.PCG64(seed=1000))
+    scores = tf.constant(random.normal(size=(10, 5)))
+    ids = tf.constant(random.integers(scores.shape[1], size=scores.shape[0]))
+    with tf.GradientTape() as tape:
+        tape.watch(scores)
+        loss, n_ids = uscale.softmax_cross_entropy(scores, ids, tf.ones_like(ids))
+    assert int(n_ids) == scores.shape[0]
+    assert 0 < float(loss) < 2 * np.log(5)
+    grad_scores = tape.gradient(loss, scores)
+    assert_unit_scale(grad_scores, 0.1)
+
+
 ###############################################################################
 # Layers
 
@@ -165,7 +183,7 @@ def test_initializers():
 
 
 def output_and_gradients(
-    layer: keras.layers.Layer, input_shape: Tuple[int, ...], seed: int
+    layer: Callable[..., tf.Tensor], input_shape: Tuple[int, ...], seed: int
 ) -> Dict[str, np.ndarray]:
     random = np.random.Generator(np.random.PCG64(seed))
     inputs = tf.constant(random.normal(size=input_shape).astype(np.float32))
@@ -185,5 +203,38 @@ def test_layer_dense():
     layer = uscale.Dense(200, seed=123)
     out = output_and_gradients(layer, (100, 150), seed=456)
     assert out["outputs"].shape == (100, 200)
-    for k in out:
-        assert_unit_scale(out[k], tol=0.1, err_msg=f"for {k}")
+    assert_all_unit_scale(out, tol=0.1)
+
+
+def test_layer_causalconv1d():
+    layer = uscale.CausalConv1D(filters=200, kernel_size=7, seed=321)
+    out = output_and_gradients(layer, (30, 19, 100), seed=654)
+    assert out["outputs"].shape == (30, 19, 200)
+    assert_all_unit_scale(out, tol=0.1)
+
+    with pytest.raises(ValueError) as error:
+        uscale.CausalConv1D(filters=16, kernel_size=5, groups=3)
+    assert "Filters (16)" in str(error)
+    assert "groups (3)" in str(error)
+
+    layer = uscale.CausalConv1D(filters=15, kernel_size=5, groups=3)
+    with pytest.raises(ValueError) as error:
+        layer(tf.zeros((1, 10, 16)))
+    assert "feature size (16)" in str(error)
+    assert "groups (3)" in str(error)
+
+
+def test_layer_embedding():
+    random = np.random.Generator(np.random.PCG64(seed=200))
+    layer = uscale.Embedding(table_size=40, embeddings_size=50, seed=100)
+    with tf.GradientTape() as tape:
+        outputs = layer(random.integers(layer.table_size, size=(8, 16)))
+    assert_unit_scale(outputs, tol=0.1)
+
+    grad_embeddings = tape.gradient(
+        outputs, layer.embeddings, random.normal(size=outputs.shape).astype(np.float32)
+    )
+    grad_embeddings = tf.math.unsorted_segment_sum(
+        grad_embeddings.values, grad_embeddings.indices, grad_embeddings.shape[0]
+    )
+    assert_unit_scale(grad_embeddings, tol=0.1)
