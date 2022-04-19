@@ -8,5 +8,6 @@ pylint
 pytest
 pytest-cov
 seaborn
+tabulate
 tqdm
 types-dataclasses

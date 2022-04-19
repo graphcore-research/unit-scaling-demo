@@ -17,6 +17,21 @@ def batched_gather(tables: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:
     return tf.reshape(values, indices.shape)
 
 
+def softmax_cross_entropy(
+    scores: tf.Tensor, ids: tf.Tensor, mask: tf.Tensor
+) -> Tuple[tf.Tensor, tf.Tensor]:
+    """Compute masked softmax cross entropy loss.
+
+    returns -- (average_loss, n_items)
+    """
+    logp = tf.nn.log_softmax(scores)
+    # Better compilation on IPU vs `tf.gather(logp, ids, batch_dims=2)`
+    target_logp = batched_gather(logp, ids)
+    total_loss = tf.reduce_sum(tf.cast(mask, target_logp.dtype) * -target_logp)
+    n_ids = tf.reduce_sum(tf.cast(mask, tf.int32))
+    return total_loss / tf.cast(n_ids, total_loss.dtype), n_ids
+
+
 class PreNormResidualLayer(keras.layers.Layer):  # type:ignore[misc]
     """A PreNorm residual layer (https://aclanthology.org/P18-1008/)."""
 
@@ -61,3 +76,28 @@ class FFNLayer(keras.layers.Layer):  # type:ignore[misc]
 
     def call(self, x: tf.Tensor) -> tf.Tensor:
         return self.down(tf.nn.relu(self.up(x)))  # type:ignore[misc]
+
+
+class PadAndShiftLayer(keras.layers.Layer):  # type:ignore[misc]
+    """Shifts sequence features one place to the right with a trainable padding vector."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.padding: tf.Variable = None
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        if len(input_shape) != 3:
+            raise ValueError(
+                f"Input should be 3D (batch, sequence, feature), actual shape {input_shape}"
+            )
+        self.padding = self.add_weight(
+            name="padding",
+            shape=input_shape[-1],
+            dtype=self.dtype,
+            initializer=keras.initializers.zeros,
+        )
+
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        pad = tf.tile(self.padding[tf.newaxis, tf.newaxis], [inputs.shape[0], 1, 1])
+        return tf.concat([pad, inputs[:, :-1, :]], axis=1)

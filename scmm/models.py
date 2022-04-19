@@ -1,13 +1,13 @@
 """Core model definitions."""
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any, Dict, Iterator
 
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 
-from . import layers
+from . import layers, uscale
 from .pedal import utility
 
 
@@ -36,14 +36,6 @@ class ResidualConv(Settings):
     group_size: int
     ffn_multiple: float
     kind: str = "residual_conv"
-
-
-def _built(
-    layer: keras.layers.Layer, shape: Tuple[Optional[int], ...]
-) -> keras.layers.Layer:
-    """Build a layer and return it."""
-    layer.build(shape)
-    return layer
 
 
 class _SimpleConvLayer(keras.layers.Conv1D):  # type:ignore[misc]
@@ -100,34 +92,44 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
         super().__init__()
         self.settings = settings
         seeds = iter(utility.split_seed(settings.seed, 1000))  # plenty of seeds
-        shape = (None, None, settings.hidden_size)
-        self.embed = _built(
-            keras.layers.Embedding(
-                settings.vocab_size,
-                settings.hidden_size,
-                embeddings_initializer=keras.initializers.RandomUniform(
-                    minval=-np.sqrt(3), maxval=np.sqrt(3), seed=next(seeds)
-                ),
-            ),
-            (),
+
+        self.embed = keras.layers.Embedding(
+            settings.vocab_size,
+            settings.hidden_size,
+            embeddings_initializer=uscale.Initializers.uniform(next(seeds)),
         )
-        self.trunk = [
-            _built(_create_trunk(settings, seeds), shape) for _ in range(settings.depth)
-        ]
-        self.norm = _built(keras.layers.LayerNormalization(), shape)
-        self.predict = _built(
-            keras.layers.Dense(
-                settings.vocab_size,
-                kernel_initializer=keras.initializers.GlorotUniform(seed=next(seeds)),
-            ),
-            shape,
+        self.trunk = [_create_trunk(settings, seeds) for _ in range(settings.depth)]
+        self.norm = keras.layers.LayerNormalization()
+        self.predict = keras.layers.Dense(
+            settings.vocab_size,
+            kernel_initializer=keras.initializers.GlorotUniform(seed=next(seeds)),
         )
-        self.predict_padding = self.add_weight(
-            name="predict_padding",
-            shape=settings.vocab_size,
-            dtype=self.dtype,
-            initializer=keras.initializers.zeros,
-        )
+        self.predict_padding = layers.PadAndShiftLayer()
+
+        # Our base model is always pre-built
+        self.build((None, None))
+        for _, layer in utility.named_layers(self):
+            assert layer.built
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+
+        self.embed.build(input_shape)
+        hidden_shape = tuple(input_shape) + (self.settings.hidden_size,)
+        for layer in self.trunk:
+            layer.build(hidden_shape)
+        self.norm.build(hidden_shape)
+        self.predict.build(hidden_shape)
+        self.predict_padding.build(tuple(input_shape) + (self.settings.vocab_size,))
+
+    def run(self, tokens: tf.Tensor, mask: tf.Tensor) -> Dict[str, tf.Tensor]:
+        """Run the language model for cross entropy loss."""
+        hiddens = self.embed(tokens)
+        for layer in self.trunk:
+            hiddens = layer(hiddens)
+        scores = self.predict_padding(self.predict(self.norm(hiddens)))
+        loss, n_tokens = layers.softmax_cross_entropy(scores, tokens, mask)
+        return dict(loss=loss, n_tokens=n_tokens)
 
     def weight_stats(self) -> Dict[str, Any]:
         """Stats regarding weights in the model."""
@@ -157,26 +159,3 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
             )
         for k in weights:
             variables[k].assign(weights[k])
-
-    def _shift_predictions(self, predictions: tf.Tensor) -> tf.Tensor:
-        pad = tf.tile(
-            self.predict_padding[tf.newaxis, tf.newaxis], [predictions.shape[0], 1, 1]
-        )
-        return tf.concat([pad, predictions[:, :-1, :]], axis=1)
-
-    @staticmethod
-    def _total_loss(scores: tf.Tensor, tokens: tf.Tensor, mask: tf.Tensor) -> tf.Tensor:
-        logp = tf.nn.log_softmax(scores)
-        # Better compilation on IPU vs `tf.gather(logp, tokens, batch_dims=2)`
-        target_logp = layers.batched_gather(logp, tokens)
-        return tf.reduce_sum(tf.cast(mask, target_logp.dtype) * -target_logp)
-
-    def run(self, tokens: tf.Tensor, mask: tf.Tensor) -> Dict[str, tf.Tensor]:
-        """Run the language model for cross entropy loss."""
-        hiddens = self.embed(tokens)
-        for layer in self.trunk:
-            hiddens = layer(hiddens)
-        scores = self._shift_predictions(self.predict(self.norm(hiddens)))
-        loss = self._total_loss(scores, tokens, mask)
-        n_tokens = tf.reduce_sum(tf.cast(mask, tf.int32))
-        return dict(loss=loss / tf.cast(n_tokens, loss.dtype), n_tokens=n_tokens)
