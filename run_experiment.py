@@ -5,10 +5,9 @@ import dataclasses
 
 import scmm as S
 
+out, profile = None, None
 # profile = Path("out/profiles/dev")
-profile = None
-# out = Path("out/models/dev")
-out = None
+# out = Path("out/dev")
 
 # ssub -t mk2 -n 1 -- python run_experiment.py
 settings = S.experiments.Settings(
@@ -19,7 +18,7 @@ settings = S.experiments.Settings(
         seed=None,
         hidden_size=128,
         depth=8,
-        kernel_size=5,
+        kernel_size=7,
         ffn_multiple=4,
         group_size=16,
     ),
@@ -30,6 +29,7 @@ settings = S.experiments.Settings(
         steps=int(1e6),
         valid_interval=int(1e4),
         learning_rate=1e-3,
+        weight_decay=1e-3,
     ),
     # target=S.pedal.xpu.CpuSettings(),
     target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(1e3)),
