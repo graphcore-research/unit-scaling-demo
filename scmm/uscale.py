@@ -3,7 +3,7 @@
 import collections
 import functools
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import tensorflow as tf
@@ -211,10 +211,10 @@ def conv1d(
 
 
 def relu(features: tf.Tensor) -> tf.Tensor:
-    """A scaled ReLU nonlinearity."""
+    """A scaled ReLU nonlinearity, shifted to have zero mean for unit normal inputs."""
     return scaling(
-        tf.nn.relu(features),
-        forward=np.sqrt(2) / np.sqrt(1 - 1 / np.pi),
+        tf.nn.relu(features) - 1 / np.sqrt(2 * np.pi),
+        forward=np.sqrt(2 / (1 - 1 / np.pi)),
         backward=np.sqrt(2),
     )
 
@@ -253,7 +253,7 @@ def softmax_cross_entropy(
 # Layers
 
 
-class Initializers:
+class initializers:  # pylint:disable=invalid-name
     """Unit-variance initializers."""
 
     @staticmethod
@@ -267,16 +267,31 @@ class Initializers:
         return keras.initializers.RandomNormal(stddev=1, seed=seed)
 
 
+class activations:  # pylint:disable=invalid-name,too-few-public-methods
+    """Unit-variance activations."""
+
+    linear = staticmethod(tf.identity)
+    relu = staticmethod(relu)
+
+    @classmethod
+    def get(cls, name: Optional[str]) -> Callable[[tf.Tensor], tf.Tensor]:
+        """Select an activation function by name (default: linear)."""
+        return getattr(cls, name or "linear")  # type:ignore[no-any-return]
+
+
 class Dense(keras.layers.Layer):  # type:ignore[misc]
     """A scaled (and more restrictive) version of keras.layers.Dense."""
 
-    def __init__(self, units: int, seed: Optional[int] = None):
+    def __init__(
+        self, units: int, activation: Optional[str] = None, seed: Optional[int] = None
+    ):
         super().__init__(self)
         self.units = units
         self.kernel: tf.Variable = None
-        self.kernel_initializer = Initializers.uniform(seed)
+        self.kernel_initializer = initializers.uniform(seed)
         self.bias: tf.Variable = None
         self.bias_initializer = keras.initializers.zeros()
+        self.activation = activations.get(activation)
 
     def build(self, input_shape: tf.TensorShape) -> None:
         super().build(input_shape)
@@ -292,17 +307,20 @@ class Dense(keras.layers.Layer):  # type:ignore[misc]
         )
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
-        return add_bias(matmul(inputs, self.kernel), self.bias)
+        return self.activation(add_bias(matmul(inputs, self.kernel), self.bias))
 
 
 class CausalConv1D(keras.layers.Layer):  # type:ignore[misc]
     """A scaled causal 1D convolution."""
+
+    # pylint:disable=too-many-instance-attributes
 
     def __init__(
         self,
         filters: int,
         kernel_size: int,
         groups: Optional[int] = None,
+        activation: Optional[str] = None,
         seed: Optional[int] = None,
     ):
         super().__init__()
@@ -314,9 +332,10 @@ class CausalConv1D(keras.layers.Layer):  # type:ignore[misc]
                 f"Filters ({filters}) must be evenly divisible by groups ({self.groups})"
             )
         self.kernel: tf.Variable = None
-        self.kernel_initializer = Initializers.uniform(seed)
+        self.kernel_initializer = initializers.uniform(seed)
         self.bias: tf.Variable = None
         self.bias_initializer = keras.initializers.zeros()
+        self.activation = activations.get(activation)
 
     def build(self, input_shape: tf.TensorShape) -> None:
         super().build(input_shape)
@@ -346,7 +365,7 @@ class CausalConv1D(keras.layers.Layer):  # type:ignore[misc]
             conv1d(padded, self.kernel, padding="VALID"),
             forward=(length / (length + (1 - self.kernel_size) / 2)) ** 0.5,
         )
-        return add_bias(outputs, self.bias)
+        return self.activation(add_bias(outputs, self.bias))
 
 
 class Embedding(layers.Embedding):

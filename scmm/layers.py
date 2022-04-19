@@ -139,6 +139,27 @@ class Embedding(keras.layers.Layer):  # type:ignore[misc]
         return gather_dense_gradients(self.embeddings, inputs)
 
 
+class Isotropic(keras.layers.Layer):  # type:ignore[misc]
+    """Like keras.models.Sequential, but isotropic & with friendly names for each layer."""
+
+    def __init__(self, **layers: keras.layers.Layer):
+        super().__init__()
+        self._layers = layers
+        for name, layer in layers.items():
+            setattr(self, name, layer)
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        for layer in self._layers.values():
+            layer.build(input_shape)
+
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        outputs = inputs
+        for layer in self._layers.values():
+            outputs = layer(outputs)
+        return outputs
+
+
 ####################
 # Optimizers
 

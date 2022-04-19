@@ -15,6 +15,7 @@ def _test_settings(path: Path) -> experiments.Settings:
     return experiments.Settings(
         data=experiments.DataSettings(Path(__file__).parent / "data"),
         model=models.SimpleConv(
+            unit_scale=True,
             hidden_size=64,
             depth=1,
             kernel_size=5,

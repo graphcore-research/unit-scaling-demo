@@ -122,7 +122,8 @@ def check_op(
     seed: int,
     args: Dict[str, Tuple[int, ...]],
     extra_args: Optional[Dict[str, Any]] = None,
-) -> None:
+    shifted: bool = False,
+) -> Dict[str, tf.Tensor]:
     random = np.random.Generator(np.random.PCG64(seed))
     inputs = {
         k: tf.constant(random.normal(size=shape).astype(np.float32))
@@ -142,15 +143,36 @@ def check_op(
     for arg in scaled_grad:
         assert_unit_scale(scaled_grad[arg], tol=0.1, err_msg=f"for grad {arg}")
 
-    assert_scaled_allclose(scaled_out, reference_out, atol=1e-3)
+    assert_scaled_allclose(
+        scaled_out - shifted * np.mean(scaled_out),
+        reference_out - shifted * np.mean(reference_out),
+        atol=1e-3,
+    )
     for arg in scaled_grad:
         assert_scaled_allclose(
             scaled_grad[arg], reference_grad[arg], atol=1e-3, err_msg=f"for grad {arg}"
         )
 
+    return dict(
+        scaled_out=scaled_out,
+        scaled_grad=scaled_grad,
+        reference_out=reference_out,
+        reference_grad=reference_grad,
+    )
+
 
 def test_op_relu():
-    check_op(uscale.relu, tf.nn.relu, seed=100, args=dict(features=(1000,)))
+    out = check_op(
+        uscale.relu, tf.nn.relu, seed=100, args=dict(features=(1000,)), shifted=True
+    )
+    np.testing.assert_allclose(np.mean(out["scaled_out"]), 0, atol=0.1)
+
+
+def test_activations():
+    x = tf.constant([-1, 0, 1], dtype=tf.float32)
+    np.testing.assert_allclose(uscale.activations.get("linear")(x), x)
+    assert uscale.activations.get(None) is uscale.activations.linear
+    assert uscale.activations.get("relu") is uscale.activations.relu
 
 
 def test_op_matmul():
@@ -189,8 +211,8 @@ def test_op_softmax_cross_entropy():
 
 
 def test_initializers():
-    assert_unit_scale(uscale.Initializers.uniform(100)((1000,)), 0.05)
-    assert_unit_scale(uscale.Initializers.normal(200)((1000,)), 0.05)
+    assert_unit_scale(uscale.initializers.uniform(100)((1000,)), 0.05)
+    assert_unit_scale(uscale.initializers.normal(200)((1000,)), 0.05)
 
 
 def output_and_gradients(

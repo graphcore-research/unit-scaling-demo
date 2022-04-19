@@ -6,13 +6,16 @@ import pytest
 from .. import models
 
 SIMPLE_SETTINGS = models.SimpleConv(
+    unit_scale=False,
     seed=100,
     vocab_size=100,
     hidden_size=8,
     depth=2,
     kernel_size=5,
 )
+SIMPLE_UNIT_SCALE_SETTINGS = dataclasses.replace(SIMPLE_SETTINGS, unit_scale=True)
 RESIDUAL_SETTINGS = models.ResidualConv(
+    unit_scale=False,
     seed=100,
     vocab_size=100,
     hidden_size=8,
@@ -23,7 +26,9 @@ RESIDUAL_SETTINGS = models.ResidualConv(
 )
 
 
-@pytest.mark.parametrize("settings", [SIMPLE_SETTINGS, RESIDUAL_SETTINGS])
+@pytest.mark.parametrize(
+    "settings", [SIMPLE_SETTINGS, SIMPLE_UNIT_SCALE_SETTINGS, RESIDUAL_SETTINGS]
+)
 def test_model(settings: models.Settings):
     batch_sequences = 3
     sequence_length = 12

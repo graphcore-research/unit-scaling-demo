@@ -72,6 +72,17 @@ def test_embedding():
     assert layer(random.integers(layer.table_size, size=(5, 15))).shape == (5, 15, 16)
 
 
+def test_isotropic():
+    layer = layers.Isotropic(
+        dense=keras.layers.Dense(15), norm=keras.layers.LayerNormalization()
+    )
+    layer.build((None, 15))
+    assert layer.dense.built
+    assert layer.norm.built
+    random = np.random.Generator(np.random.PCG64(seed=500))
+    assert layer(random.normal(size=(7, 15))).shape == (7, 15)
+
+
 def test_adamw():
     random = np.random.Generator(np.random.PCG64(12345))
     xs = random.normal(size=(1000, 20))

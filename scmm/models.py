@@ -1,13 +1,13 @@
 """Core model definitions."""
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterator
+from typing import Any, Callable, Dict, Iterator, List, Tuple
 
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 
-from . import layers
+from . import layers, uscale
 from .pedal import utility
 
 
@@ -15,6 +15,7 @@ from .pedal import utility
 class Settings:
     """Model configuration."""
 
+    unit_scale: bool
     seed: int
     vocab_size: int
     hidden_size: int
@@ -38,51 +39,85 @@ class ResidualConv(Settings):
     kind: str = "residual_conv"
 
 
-class _SimpleConvLayer(keras.layers.Conv1D):  # type:ignore[misc]
-    def __init__(self, settings: SimpleConv, seeds: Iterator[int]):
-        super().__init__(
-            settings.hidden_size,
-            kernel_size=settings.kernel_size,
-            padding="causal",
-            kernel_initializer=keras.initializers.GlorotUniform(seed=next(seeds)),
+class _ModelFactory:  # pylint:disable=missing-function-docstring
+    def __init__(self, settings: Settings, seeds: Iterator[int]):
+        self.settings = settings
+        self.seeds = seeds
+
+    def kernel_initializer(self) -> keras.initializers.Initializer:
+        return keras.initializers.GlorotUniform(seed=next(self.seeds))
+
+    def embed(self) -> keras.layers.Layer:
+        return layers.Embedding(
+            self.settings.vocab_size, self.settings.hidden_size, seed=next(self.seeds)
         )
 
-    def call(self, x: tf.Tensor) -> tf.Tensor:
-        return tf.nn.relu(super().call(x))
-
-
-class _ResidualConvLayer(keras.layers.Layer):  # type:ignore[misc]
-    def __init__(self, settings: ResidualConv, seeds: Iterator[int]):
-        super().__init__()
-        self.conv = layers.PreNormResidualLayer(
-            keras.layers.Conv1D(
-                settings.hidden_size,
-                kernel_size=settings.kernel_size,
-                groups=settings.hidden_size // settings.group_size,
+    def trunk_layer(self) -> keras.layers.Layer:
+        if isinstance(self.settings, SimpleConv):
+            if self.settings.unit_scale:
+                return uscale.CausalConv1D(
+                    self.settings.hidden_size,
+                    kernel_size=self.settings.kernel_size,
+                    activation="relu",
+                    seed=next(self.seeds),
+                )
+            return keras.layers.Conv1D(
+                self.settings.hidden_size,
+                kernel_size=self.settings.kernel_size,
+                activation="relu",
                 padding="causal",
-                kernel_initializer=keras.initializers.GlorotUniform(seed=next(seeds)),
+                kernel_initializer=self.kernel_initializer(),
             )
+
+        if isinstance(self.settings, ResidualConv):
+            assert (
+                not self.settings.unit_scale
+            ), "unit_scale unimplemented for ResidualConv"
+            return layers.Isotropic(
+                conv=layers.PreNormResidualLayer(
+                    keras.layers.Conv1D(
+                        self.settings.hidden_size,
+                        kernel_size=self.settings.kernel_size,
+                        groups=self.settings.hidden_size // self.settings.group_size,
+                        padding="causal",
+                        kernel_initializer=self.kernel_initializer(),
+                    )
+                ),
+                ffn=layers.PreNormResidualLayer(
+                    layers.FFNLayer(
+                        self.settings.ffn_multiple,
+                        seeds=(next(self.seeds), next(self.seeds)),
+                    )
+                ),
+            )
+        assert False, f"Unexpected model type {type(self.settings)}"
+
+    def trunk(self) -> List[keras.layers.Layer]:
+        return [self.trunk_layer() for _ in range(self.settings.depth)]
+
+    @staticmethod
+    def norm() -> keras.layers.Layer:
+        return keras.layers.LayerNormalization()
+
+    def predict(self) -> keras.layers.Layer:
+        if self.settings.unit_scale:
+            return uscale.Dense(self.settings.vocab_size, seed=next(self.seeds))
+        return keras.layers.Dense(
+            self.settings.vocab_size, kernel_initializer=self.kernel_initializer()
         )
-        self.ffn = layers.PreNormResidualLayer(
-            layers.FFNLayer(settings.ffn_multiple, seeds=(next(seeds), next(seeds)))
+
+    @staticmethod
+    def predict_padding() -> keras.layers.Layer:
+        return layers.PadAndShiftLayer()
+
+    def loss(
+        self,
+    ) -> Callable[[tf.Tensor, tf.Tensor, tf.Tensor], Tuple[tf.Tensor, tf.Tensor]]:
+        return (
+            uscale.softmax_cross_entropy
+            if self.settings.unit_scale
+            else layers.softmax_cross_entropy
         )
-
-    def build(self, input_shape: tf.TensorShape) -> None:
-        super().build(input_shape)
-        self.conv.build(input_shape)
-        self.ffn.build(input_shape)
-
-    def call(self, x: tf.Tensor) -> tf.Tensor:
-        x = self.conv(x)
-        return self.ffn(x)
-
-
-def _create_trunk(settings: Settings, seeds: Iterator[int]) -> keras.layers.Layer:
-    if isinstance(settings, SimpleConv):
-        return _SimpleConvLayer(settings, seeds)
-    if isinstance(settings, ResidualConv):
-        return _ResidualConvLayer(settings, seeds)
-    assert False, f"Unexpected models settings type {type(settings)}"
 
 
 class Model(keras.layers.Layer):  # type:ignore[misc]
@@ -91,18 +126,16 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
     def __init__(self, settings: Settings):
         super().__init__()
         self.settings = settings
-        seeds = iter(utility.split_seed(settings.seed, 1000))  # plenty of seeds
 
-        self.embed = layers.Embedding(
-            settings.vocab_size, settings.hidden_size, seed=next(seeds)
+        factory = _ModelFactory(
+            settings, iter(utility.split_seed(settings.seed, 1000))  # plenty of seeds
         )
-        self.trunk = [_create_trunk(settings, seeds) for _ in range(settings.depth)]
-        self.norm = keras.layers.LayerNormalization()
-        self.predict = keras.layers.Dense(
-            settings.vocab_size,
-            kernel_initializer=keras.initializers.GlorotUniform(seed=next(seeds)),
-        )
-        self.predict_padding = layers.PadAndShiftLayer()
+        self.embed = factory.embed()
+        self.trunk = factory.trunk()
+        self.norm = factory.norm()
+        self.predict = factory.predict()
+        self.predict_padding = factory.predict_padding()
+        self.loss = factory.loss()
 
         # Our base model is always pre-built
         self.build((None, None))
@@ -126,7 +159,7 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
         for layer in self.trunk:
             hiddens = layer(hiddens)
         scores = self.predict_padding(self.predict(self.norm(hiddens)))
-        loss, n_tokens = layers.softmax_cross_entropy(scores, tokens, mask)
+        loss, n_tokens = self.loss(scores, tokens, mask)
         return dict(loss=loss, n_tokens=n_tokens)
 
     def weight_stats(self) -> Dict[str, Any]:
