@@ -1,6 +1,6 @@
 """General purpose layers and functions."""
 
-from typing import Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
@@ -15,6 +15,16 @@ def batched_gather(tables: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:
     )
     values = tf.gather(tf.reshape(tables, (-1,)), tf.reshape(indices + offsets, (-1,)))
     return tf.reshape(values, indices.shape)
+
+
+@tf.custom_gradient  # type:ignore[misc]
+def gather_dense_gradients(params: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:
+    """Gather with dense gradients (no IndexedSlices)."""
+
+    def grad(upstream: tf.Tensor) -> tf.Tensor:
+        return tf.math.unsorted_segment_sum(upstream, indices, params.shape[0]), None
+
+    return tf.gather(params, indices), grad
 
 
 def softmax_cross_entropy(
@@ -101,3 +111,95 @@ class PadAndShiftLayer(keras.layers.Layer):  # type:ignore[misc]
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
         pad = tf.tile(self.padding[tf.newaxis, tf.newaxis], [inputs.shape[0], 1, 1])
         return tf.concat([pad, inputs[:, :-1, :]], axis=1)
+
+
+class Embedding(keras.layers.Layer):  # type:ignore[misc]
+    """Like keras.layers.Embedding, but with dense gradients instead of IndexedSlices."""
+
+    def __init__(
+        self, table_size: int, embeddings_size: int, seed: Optional[int] = None
+    ):
+        super().__init__(self)
+        self.table_size = table_size
+        self.embeddings_size = embeddings_size
+        self.embeddings: tf.Variable = None
+        self.embeddings_initializer = keras.initializers.RandomUniform(
+            -np.sqrt(3), np.sqrt(3), seed=seed
+        )
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        self.embeddings = self.add_weight(
+            "embeddings",
+            shape=(self.table_size, self.embeddings_size),
+            initializer=self.embeddings_initializer,
+        )
+
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        return gather_dense_gradients(self.embeddings, inputs)
+
+
+####################
+# Optimizers
+
+
+class AdamW(keras.optimizers.Optimizer):  # type:ignore[misc]
+    """AdamW (https://arxiv.org/abs/1711.05101)."""
+
+    def __init__(
+        self,
+        learning_rate: float = 0.001,
+        weight_decay: float = 0.004,
+        beta_1: float = 0.9,
+        beta_2: float = 0.999,
+        epsilon: float = 1e-7,
+        name: str = "AdamW",
+    ):
+        super().__init__(name=name)
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.beta_1 = beta_1
+        self.beta_2 = beta_2
+        self.epsilon = epsilon
+        self._step_variable: tf.Variable = None
+
+    @property
+    def _step(self) -> tf.Variable:
+        if self._step_variable is None:
+            with tf.name_scope(self._name):
+                self._step_variable = self.add_weight("step", (), dtype=tf.int32)
+        return self._step_variable
+
+    def _update(
+        self, gradient: tf.Tensor, variable: tf.Variable, scale: tf.Tensor
+    ) -> List[tf.Operation]:
+        assert variable.dtype == tf.float32, "float16 AdamW not implemented"
+        with tf.name_scope(self._name):
+            m_prev = self.add_slot(variable, "adam_m")
+            v_prev = self.add_slot(variable, "adam_v")
+
+        m_next = m_prev.assign(self.beta_1 * m_prev + (1 - self.beta_1) * gradient)
+        v_next = v_prev.assign(self.beta_2 * v_prev + (1 - self.beta_2) * gradient**2)
+        variable_update = variable.assign(
+            variable
+            - self.learning_rate * self.weight_decay * variable
+            - scale * m_next / (tf.sqrt(v_next) + self.epsilon)
+        )
+        return [m_next, v_next, variable_update]
+
+    def apply_gradients(
+        self,
+        grads_and_vars: Iterable[Tuple[tf.Tensor, tf.Variable]],
+        name: Optional[str] = None,
+    ) -> tf.Operation:
+        step_prev = self._step
+        step = step_prev.assign(step_prev + 1)
+        scale = (
+            self.learning_rate
+            * tf.sqrt(1 - self.beta_2 ** tf.cast(step, tf.float32))
+            / (1 - self.beta_1 ** tf.cast(step, tf.float32))
+        )
+        updates = [step]
+        for grad, variable in grads_and_vars:
+            updates.extend(self._update(grad, variable, scale=scale))
+        return tf.group(*updates, name=name)

@@ -9,7 +9,7 @@ from tensorflow import keras
 from .. import uscale
 from ..pedal import utility
 
-###############################################################################
+####################
 # Utility
 
 
@@ -74,7 +74,7 @@ def test_activation_tracker_embedding_gradient():
     )
 
 
-###############################################################################
+####################
 # Ops
 
 
@@ -83,9 +83,20 @@ def test_scaling():
         x = tf.range(3, dtype=tf.float32)
         tape.watch(x)
         y = uscale.scaling(x, forward=2, backward=3)
-    (grad_x,) = tape.gradient(y, [x], tf.ones_like(y))
+    grad_x = tape.gradient(y, x, tf.ones_like(y))
     np.testing.assert_allclose(y, [0, 2, 4])
     np.testing.assert_allclose(grad_x, [3, 3, 3])
+
+
+def test_scaling_indexed_slices():
+    with tf.GradientTape() as tape:
+        table = tf.range(10, dtype=tf.float32)
+        tape.watch(table)
+        y = tf.gather(uscale.scaling(table, backward=5), tf.constant([1, 1, 2]))
+    grad_table = tape.gradient(y, table, tf.ones_like(y))
+    np.testing.assert_allclose(y, [1, 1, 2])
+    np.testing.assert_allclose(grad_table.indices, [1, 1, 2])
+    np.testing.assert_allclose(grad_table.values, [5, 5, 5])
 
 
 def assert_scaled_allclose(
@@ -173,7 +184,7 @@ def test_op_softmax_cross_entropy():
     assert_unit_scale(grad_scores, 0.1)
 
 
-###############################################################################
+####################
 # Layers
 
 
@@ -233,8 +244,5 @@ def test_layer_embedding():
 
     grad_embeddings = tape.gradient(
         outputs, layer.embeddings, random.normal(size=outputs.shape).astype(np.float32)
-    )
-    grad_embeddings = tf.math.unsorted_segment_sum(
-        grad_embeddings.values, grad_embeddings.indices, grad_embeddings.shape[0]
     )
     assert_unit_scale(grad_embeddings, tol=0.1)

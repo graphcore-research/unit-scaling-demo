@@ -12,7 +12,7 @@ from tensorflow import keras
 from . import layers
 from .pedal import utility
 
-###############################################################################
+####################
 # Utility
 
 
@@ -139,7 +139,7 @@ class ActivationTracker:
         )
 
 
-###############################################################################
+####################
 # Ops
 
 
@@ -249,7 +249,7 @@ def softmax_cross_entropy(
     return loss, n_ids
 
 
-###############################################################################
+####################
 # Layers
 
 
@@ -349,30 +349,13 @@ class CausalConv1D(keras.layers.Layer):  # type:ignore[misc]
         return add_bias(outputs, self.bias)
 
 
-class Embedding(keras.layers.Layer):  # type:ignore[misc]
+class Embedding(layers.Embedding):
     """A scaled embedding layer."""
-
-    def __init__(
-        self, table_size: int, embeddings_size: int, seed: Optional[int] = None
-    ):
-        super().__init__()
-        self.table_size = table_size
-        self.embeddings_size = embeddings_size
-        self.embeddings: tf.Variable = None
-        self.embeddings_initializer = Initializers.uniform(seed)
-
-    def build(self, input_shape: tf.TensorShape) -> None:
-        super().build(input_shape)
-        self.embeddings = self.add_weight(
-            "embeddings",
-            shape=(self.table_size, self.embeddings_size),
-            initializer=self.embeddings_initializer,
-        )
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
         # We don't need to worry about inputs scaling, as it is non-differentiable
         batch_size = np.prod(inputs.shape)
-        return tf.gather(
+        return layers.gather_dense_gradients(
             scaling(self.embeddings, backward=(self.table_size / batch_size) ** 0.5),
             inputs,
         )

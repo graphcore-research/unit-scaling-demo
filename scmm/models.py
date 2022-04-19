@@ -7,7 +7,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 
-from . import layers, uscale
+from . import layers
 from .pedal import utility
 
 
@@ -93,10 +93,8 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
         self.settings = settings
         seeds = iter(utility.split_seed(settings.seed, 1000))  # plenty of seeds
 
-        self.embed = keras.layers.Embedding(
-            settings.vocab_size,
-            settings.hidden_size,
-            embeddings_initializer=uscale.Initializers.uniform(next(seeds)),
+        self.embed = layers.Embedding(
+            settings.vocab_size, settings.hidden_size, seed=next(seeds)
         )
         self.trunk = [_create_trunk(settings, seeds) for _ in range(settings.depth)]
         self.norm = keras.layers.LayerNormalization()

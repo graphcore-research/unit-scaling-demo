@@ -7,9 +7,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
 
 import tensorflow as tf
-from tensorflow import keras
 
-from . import datasets, models
+from . import datasets, layers, models
 from .pedal import xpu
 
 
@@ -23,7 +22,8 @@ class Settings:
     learning_rate: float
     beta_1: float = 0.9
     beta_2: float = 0.999
-    optimiser: str = "adam"
+    weight_decay: float = 0
+    optimiser: str = "adamw"
 
 
 def eval_summary(results: Iterable[datasets.Batch]) -> Dict[str, float]:
@@ -45,9 +45,10 @@ def train(
     assert (
         settings.batch.loop_seed is not None
     ), "please specify a seed for training batches"
-    assert settings.optimiser == "adam"
-    optimiser = keras.optimizers.Adam(
+    assert settings.optimiser == "adamw"
+    optimiser = layers.AdamW(
         learning_rate=settings.learning_rate,
+        weight_decay=settings.weight_decay,
         beta_1=settings.beta_1,
         beta_2=settings.beta_2,
     )

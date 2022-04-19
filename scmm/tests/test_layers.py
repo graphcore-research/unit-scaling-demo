@@ -1,3 +1,5 @@
+from typing import List
+
 import numpy as np
 import pytest
 import tensorflow as tf
@@ -13,6 +15,17 @@ def test_batched_gather():
         np.array(layers.batched_gather(tables, indices)),
         [[0 + 0, 4 + 0, 8 + 3], [12 + 2, 16 + 2, 20 + 3]],
     )
+
+
+def test_gather_dense_gradients():
+    params = 10 * tf.range(5, dtype=np.float32)
+    indices = tf.constant([[1, 2], [4, 4]])
+    with tf.GradientTape() as tape:
+        tape.watch(params)
+        result = layers.gather_dense_gradients(params[:, tf.newaxis], indices)[..., 0]
+    grad_params = tape.gradient(result, params, tf.constant([[10, 10], [100, 100]]))
+    np.testing.assert_allclose(result, 10 * indices)
+    np.testing.assert_allclose(grad_params, [0, 10, 10, 0, 200])
 
 
 def test_pre_norm_residual_layer():
@@ -51,3 +64,36 @@ def test_pad_and_shift_layer():
 
     with pytest.raises(ValueError):
         layers.PadAndShiftLayer().build((None, 11))
+
+
+def test_embedding():
+    random = np.random.Generator(np.random.PCG64(seed=200))
+    layer = layers.Embedding(table_size=40, embeddings_size=16, seed=100)
+    assert layer(random.integers(layer.table_size, size=(5, 15))).shape == (5, 15, 16)
+
+
+def test_adamw():
+    random = np.random.Generator(np.random.PCG64(12345))
+    xs = random.normal(size=(1000, 20))
+    ys = xs @ random.normal(size=(20, 10))
+
+    reference_loss: List[float] = []
+    custom_loss: List[float] = []
+    decay_loss: List[float] = []
+    for optimizer, losses in [
+        (keras.optimizers.Adam(0.1), reference_loss),
+        (layers.AdamW(0.1, weight_decay=0), custom_loss),
+        (layers.AdamW(0.1, weight_decay=0.1), decay_loss),
+    ]:
+        model = keras.layers.Dense(
+            10, kernel_initializer=keras.initializers.GlorotUniform(seed=67890)
+        )
+        for _ in range(10):
+            with tf.GradientTape() as tape:
+                loss = keras.losses.mse(ys.flatten(), tf.reshape(model(xs), -1))
+            optimizer.minimize(loss, model.trainable_variables, tape=tape)
+            losses.append(float(loss))
+    np.testing.assert_allclose(custom_loss, reference_loss, atol=1e-4)
+    assert (
+        1e-3 + reference_loss[-1] < decay_loss[-1]
+    ), "decayed should be slightly worse"
