@@ -143,33 +143,39 @@ class ActivationTracker:
 # Ops
 
 
-@tf.custom_gradient  # type:ignore[misc]
 def scaling(
-    input: tf.Tensor,  # pylint:disable=redefined-builtin
-    *,
-    forward: Optional[float] = None,
-    backward: Optional[float] = None,
-) -> tf.Tensor:
-    """Perform arbitary *seperate* scaling in the forward and backward passes."""
+    forward: Optional[float] = None, backward: Optional[float] = None
+) -> Callable[[tf.Tensor], tf.Tensor]:
+    """Perform arbitary *seperate* scaling in the forward and backward passes.
 
-    def grad(upstream: tf.Tensor) -> tf.Tensor:
-        grad_input = upstream
-        if backward is not None:
-            if isinstance(upstream, tf.IndexedSlices):
-                grad_input = tf.IndexedSlices(
-                    values=upstream.values * backward,
-                    indices=upstream.indices,
-                    dense_shape=upstream.dense_shape,
-                )
-            else:
-                grad_input *= backward
-        return grad_input
+    E.g.
 
-    output = input
-    if forward is not None:
-        output *= forward
+        y = scaling(forward=2, backward=3)(x)
 
-    return output, grad
+    """
+
+    @tf.custom_gradient  # type:ignore[misc]
+    def operation(input: tf.Tensor) -> tf.Tensor:  # pylint:disable=redefined-builtin
+        def grad(upstream: tf.Tensor) -> tf.Tensor:
+            grad_input = upstream
+            if backward is not None:
+                if isinstance(upstream, tf.IndexedSlices):
+                    grad_input = tf.IndexedSlices(
+                        values=upstream.values * backward,
+                        indices=upstream.indices,
+                        dense_shape=upstream.dense_shape,
+                    )
+                else:
+                    grad_input *= backward
+            return grad_input
+
+        output = input
+        if forward is not None:
+            output *= forward
+
+        return output, grad
+
+    return operation  # type:ignore[no-any-return]
 
 
 def matmul(a: tf.Tensor, b: tf.Tensor) -> tf.Tensor:
@@ -179,9 +185,9 @@ def matmul(a: tf.Tensor, b: tf.Tensor) -> tf.Tensor:
     input_size, output_size = b.shape
     batch_size = np.prod(a.shape[:-1])
 
-    a = scaling(a, backward=output_size**-0.5)
-    b = scaling(b, backward=batch_size**-0.5)
-    return scaling(a @ b, forward=input_size**-0.5)
+    a = scaling(backward=output_size**-0.5)(a)
+    b = scaling(backward=batch_size**-0.5)(b)
+    return scaling(forward=input_size**-0.5)(a @ b)
 
 
 def conv1d(
@@ -201,21 +207,18 @@ def conv1d(
     batch_size = np.prod(batch_shape)
 
     input = scaling(
-        input,
         backward=(filter_width * output_length / input_length * output_size // n_groups)
-        ** -0.5,
-    )
-    filters = scaling(filters, backward=(output_length * batch_size) ** -0.5)
+        ** -0.5
+    )(input)
+    filters = scaling(backward=(output_length * batch_size) ** -0.5)(filters)
     output = tf.nn.conv1d(input, filters, stride=1, padding=padding)
-    return scaling(output, forward=(filter_width * input_size // n_groups) ** -0.5)
+    return scaling(forward=(filter_width * input_size // n_groups) ** -0.5)(output)
 
 
 def relu(features: tf.Tensor) -> tf.Tensor:
     """A scaled ReLU nonlinearity, shifted to have zero mean for unit normal inputs."""
-    return scaling(
-        tf.nn.relu(features) - 1 / np.sqrt(2 * np.pi),
-        forward=np.sqrt(2 / (1 - 1 / np.pi)),
-        backward=np.sqrt(2),
+    return scaling(forward=np.sqrt(2 / (1 - 1 / np.pi)), backward=np.sqrt(2))(
+        tf.nn.relu(features) - 1 / np.sqrt(2 * np.pi)
     )
 
 
@@ -223,7 +226,7 @@ def add_bias(features: tf.Tensor, bias: tf.Tensor) -> tf.Tensor:
     """Add a bias (which should be zero-initialized), with a scaled backward pass."""
     assert len(bias.shape) == 1, "bias should be 1D"
     batch_size = np.prod(features.shape[:-1])
-    return features + scaling(bias, backward=batch_size**-0.5)
+    return features + scaling(backward=batch_size**-0.5)(bias)
 
 
 def softmax_cross_entropy(
@@ -242,9 +245,8 @@ def softmax_cross_entropy(
     total_loss = tf.reduce_sum(tf.cast(mask, target_logp.dtype) * -target_logp)
     n_ids = tf.reduce_sum(tf.cast(mask, tf.int32))
     n_classes = scores.shape[1]
-    loss = scaling(
-        total_loss / tf.cast(n_ids, total_loss.dtype),
-        backward=np.prod(mask.shape) * n_classes / np.sqrt(n_classes - 1),
+    loss = scaling(backward=np.prod(mask.shape) * n_classes / np.sqrt(n_classes - 1))(
+        total_loss / tf.cast(n_ids, total_loss.dtype)
     )
     return loss, n_ids
 
@@ -362,9 +364,8 @@ class CausalConv1D(keras.layers.Layer):  # type:ignore[misc]
         length = inputs.shape[1]
         # Scaling here to account for zero-padding
         outputs = scaling(
-            conv1d(padded, self.kernel, padding="VALID"),
-            forward=(length / (length + (1 - self.kernel_size) / 2)) ** 0.5,
-        )
+            forward=(length / (length + (1 - self.kernel_size) / 2)) ** 0.5
+        )(conv1d(padded, self.kernel, padding="VALID"))
         return self.activation(add_bias(outputs, self.bias))
 
 
@@ -375,6 +376,6 @@ class Embedding(layers.Embedding):
         # We don't need to worry about inputs scaling, as it is non-differentiable
         batch_size = np.prod(inputs.shape)
         return layers.gather_dense_gradients(
-            scaling(self.embeddings, backward=(self.table_size / batch_size) ** 0.5),
+            scaling(backward=(self.table_size / batch_size) ** 0.5)(self.embeddings),
             inputs,
         )

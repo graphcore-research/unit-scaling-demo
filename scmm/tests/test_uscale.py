@@ -82,7 +82,7 @@ def test_scaling():
     with tf.GradientTape() as tape:
         x = tf.range(3, dtype=tf.float32)
         tape.watch(x)
-        y = uscale.scaling(x, forward=2, backward=3)
+        y = uscale.scaling(forward=2, backward=3)(x)
     grad_x = tape.gradient(y, x, tf.ones_like(y))
     np.testing.assert_allclose(y, [0, 2, 4])
     np.testing.assert_allclose(grad_x, [3, 3, 3])
@@ -92,7 +92,7 @@ def test_scaling_indexed_slices():
     with tf.GradientTape() as tape:
         table = tf.range(10, dtype=tf.float32)
         tape.watch(table)
-        y = tf.gather(uscale.scaling(table, backward=5), tf.constant([1, 1, 2]))
+        y = tf.gather(uscale.scaling(backward=5)(table), tf.constant([1, 1, 2]))
     grad_table = tape.gradient(y, table, tf.ones_like(y))
     np.testing.assert_allclose(y, [1, 1, 2])
     np.testing.assert_allclose(grad_table.indices, [1, 1, 2])
