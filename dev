@@ -86,10 +86,11 @@ def types() -> None:
 def lint() -> None:
     """run code linting (static checks)"""
     run(["flake8", *SOURCE])
-    run(["pylint", *_sources(core=True, script=True, tests=False)])
+    run(["pylint", "-j 16", *_sources(core=True, script=True, tests=False)])
     run(
         [
             "pylint",
+            "-j 16",
             *_sources(core=False, script=False, tests=True),
             f"--disable={','.join(PYLINT_TEST_DISABLE)}",
         ]
