@@ -17,16 +17,6 @@ def batched_gather(tables: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:
     return tf.reshape(values, indices.shape)
 
 
-@tf.custom_gradient  # type:ignore[misc]
-def gather_dense_gradients(params: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:
-    """Gather with dense gradients (no IndexedSlices)."""
-
-    def grad(upstream: tf.Tensor) -> tf.Tensor:
-        return tf.math.unsorted_segment_sum(upstream, indices, params.shape[0]), None
-
-    return tf.gather(params, indices), grad
-
-
 def softmax_cross_entropy(
     scores: tf.Tensor, ids: tf.Tensor, mask: tf.Tensor
 ) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -113,32 +103,6 @@ class PadAndShiftLayer(keras.layers.Layer):  # type:ignore[misc]
         return tf.concat([pad, inputs[:, :-1, :]], axis=1)
 
 
-class Embedding(keras.layers.Layer):  # type:ignore[misc]
-    """Like keras.layers.Embedding, but with dense gradients instead of IndexedSlices."""
-
-    def __init__(
-        self, table_size: int, embeddings_size: int, seed: Optional[int] = None
-    ):
-        super().__init__(self)
-        self.table_size = table_size
-        self.embeddings_size = embeddings_size
-        self.embeddings: tf.Variable = None
-        self.embeddings_initializer = keras.initializers.RandomUniform(
-            -np.sqrt(3), np.sqrt(3), seed=seed
-        )
-
-    def build(self, input_shape: tf.TensorShape) -> None:
-        super().build(input_shape)
-        self.embeddings = self.add_weight(
-            "embeddings",
-            shape=(self.table_size, self.embeddings_size),
-            initializer=self.embeddings_initializer,
-        )
-
-    def call(self, inputs: tf.Tensor) -> tf.Tensor:
-        return gather_dense_gradients(self.embeddings, inputs)
-
-
 class Isotropic(keras.layers.Layer):  # type:ignore[misc]
     """Like keras.models.Sequential, but isotropic & with friendly names for each layer."""
 
@@ -198,6 +162,12 @@ class AdamW(keras.optimizers.Optimizer):  # type:ignore[misc]
         with tf.name_scope(self._name):
             m_prev = self.add_slot(variable, "adam_m")
             v_prev = self.add_slot(variable, "adam_v")
+
+        if isinstance(gradient, tf.IndexedSlices):
+            # Convert to dense gradient, which is probably fine
+            gradient = tf.math.unsorted_segment_sum(
+                gradient.values, gradient.indices, gradient.shape[0]
+            )
 
         m_next = m_prev.assign(self.beta_1 * m_prev + (1 - self.beta_1) * gradient)
         v_next = v_prev.assign(self.beta_2 * v_prev + (1 - self.beta_2) * gradient**2)

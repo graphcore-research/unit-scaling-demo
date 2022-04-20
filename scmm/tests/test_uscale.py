@@ -285,10 +285,14 @@ def test_layer_embedding():
     layer = uscale.Embedding(table_size=40, embeddings_size=50, seed=100)
     with tf.GradientTape() as tape:
         outputs = layer(random.integers(layer.table_size, size=(8, 16)))
+    assert outputs.shape == (8, 16, 50)
     assert_unit_scale(outputs, tol=0.1)
 
     grad_embeddings = tape.gradient(
         outputs, layer.embeddings, random.normal(size=outputs.shape).astype(np.float32)
+    )
+    grad_embeddings = tf.math.unsorted_segment_sum(
+        grad_embeddings.values, grad_embeddings.indices, grad_embeddings.shape[0]
     )
     assert_unit_scale(grad_embeddings, tol=0.1)
 

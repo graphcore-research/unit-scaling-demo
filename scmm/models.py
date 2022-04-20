@@ -57,8 +57,13 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
                 self.settings.hidden_size,
                 seed=next(self.seeds),
             )
-        return layers.Embedding(
-            self.settings.vocab_size, self.settings.hidden_size, seed=next(self.seeds)
+        # Unit variance embeddings make sense in any case
+        return keras.layers.Embedding(
+            self.settings.vocab_size,
+            self.settings.hidden_size,
+            embeddings_initializer=keras.initializers.RandomUniform(
+                -np.sqrt(3), np.sqrt(3), seed=next(self.seeds)
+            ),
         )
 
     def conv(self) -> keras.layers.Layer:

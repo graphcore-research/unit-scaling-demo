@@ -17,17 +17,6 @@ def test_batched_gather():
     )
 
 
-def test_gather_dense_gradients():
-    params = 10 * tf.range(5, dtype=np.float32)
-    indices = tf.constant([[1, 2], [4, 4]])
-    with tf.GradientTape() as tape:
-        tape.watch(params)
-        result = layers.gather_dense_gradients(params[:, tf.newaxis], indices)[..., 0]
-    grad_params = tape.gradient(result, params, tf.constant([[10, 10], [100, 100]]))
-    np.testing.assert_allclose(result, 10 * indices)
-    np.testing.assert_allclose(grad_params, [0, 10, 10, 0, 200])
-
-
 def test_pre_norm_residual_layer():
     layer = layers.PreNormResidualLayer(keras.layers.Dense(7))
     layer.build((None, None, 7))
@@ -66,12 +55,6 @@ def test_pad_and_shift_layer():
         layers.PadAndShiftLayer().build((None, 11))
 
 
-def test_embedding():
-    random = np.random.Generator(np.random.PCG64(seed=200))
-    layer = layers.Embedding(table_size=40, embeddings_size=16, seed=100)
-    assert layer(random.integers(layer.table_size, size=(5, 15))).shape == (5, 15, 16)
-
-
 def test_isotropic():
     layer = layers.Isotropic(
         dense=keras.layers.Dense(15), norm=keras.layers.LayerNormalization()
@@ -108,3 +91,13 @@ def test_adamw():
     assert (
         1e-3 + reference_loss[-1] < decay_loss[-1]
     ), "decayed should be slightly worse"
+
+
+def test_adamw_indexed_slices():
+    optimizer = layers.AdamW(0.1)
+    table = tf.Variable(np.zeros((5, 3), dtype=np.float32))
+    indices = tf.constant([0, 2, 2, 4])
+    optimizer.minimize(
+        lambda: tf.reduce_sum(tf.gather(table, indices)), var_list=[table]
+    )
+    np.testing.assert_equal(table[:, 0].numpy() < 0, [True, False, True, False, True])
