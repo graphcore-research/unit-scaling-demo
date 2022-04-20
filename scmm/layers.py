@@ -77,12 +77,12 @@ class FFNLayer(keras.layers.Layer):  # type:ignore[misc]
             intermediate_size,
             kernel_initializer=keras.initializers.GlorotUniform(seed=self.seeds[0]),
         )
-        self.up.build((hidden_size,))
+        self.up.build(input_shape[:-1] + (hidden_size,))
         self.down = keras.layers.Dense(
             hidden_size,
             kernel_initializer=keras.initializers.GlorotUniform(seed=self.seeds[1]),
         )
-        self.down.build((intermediate_size,))
+        self.down.build(input_shape[:-1] + (intermediate_size,))
 
     def call(self, x: tf.Tensor) -> tf.Tensor:
         return self.down(tf.nn.relu(self.up(x)))  # type:ignore[misc]

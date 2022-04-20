@@ -1,5 +1,5 @@
 import functools as ft
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import numpy as np
 import pytest
@@ -120,15 +120,20 @@ def check_op(
     scaled: Callable[..., tf.Tensor],
     reference: Callable[..., tf.Tensor],
     seed: int,
-    args: Dict[str, Tuple[int, ...]],
+    args: Dict[str, Union[np.ndarray, Tuple[int, ...]]],
     extra_args: Optional[Dict[str, Any]] = None,
     shifted: bool = False,
 ) -> Dict[str, tf.Tensor]:
+    # pylint:disable=too-many-locals
     random = np.random.Generator(np.random.PCG64(seed))
-    inputs = {
-        k: tf.constant(random.normal(size=shape).astype(np.float32))
-        for k, shape in args.items()
-    }
+
+    inputs = {}
+    for key, value in args.items():
+        if isinstance(value, np.ndarray):
+            inputs[key] = tf.constant(value)
+        else:
+            inputs[key] = tf.constant(random.normal(size=value).astype(np.float32))
+
     with tf.GradientTape() as tape:
         tape.watch(inputs.values())
         scaled_out = scaled(**inputs, **(extra_args or {}))
@@ -165,7 +170,25 @@ def test_op_relu():
     out = check_op(
         uscale.relu, tf.nn.relu, seed=100, args=dict(features=(1000,)), shifted=True
     )
-    np.testing.assert_allclose(np.mean(out["scaled_out"]), 0, atol=0.1)
+    np.testing.assert_allclose(np.mean(out["scaled_out"]), 0, atol=0.1)  # centered
+
+
+def test_op_add_bias():
+    check_op(
+        uscale.add_bias,
+        lambda features, bias: features + bias,
+        seed=842,
+        args=dict(features=(1000,), bias=np.zeros(1000, dtype=np.float32)),
+    )
+
+
+def test_op_multiply_scale():
+    check_op(
+        uscale.multiply_scale,
+        lambda features, scale: features * scale,
+        seed=2345,
+        args=dict(features=(1000,), scale=np.ones(1000, dtype=np.float32)),
+    )
 
 
 def test_activations():
@@ -268,3 +291,20 @@ def test_layer_embedding():
         outputs, layer.embeddings, random.normal(size=outputs.shape).astype(np.float32)
     )
     assert_unit_scale(grad_embeddings, tol=0.1)
+
+
+@pytest.mark.parametrize("alpha", [0.1, 0.9])
+def test_layer_prenorm_residual_v2(alpha: float):  # also tests LayerNormalization
+    layer = uscale.PreNormResidualLayer(uscale.Dense(150, seed=4832), alpha)
+    out = output_and_gradients(layer, (40, 19, 150), seed=2393)
+    assert_unit_scale(out["outputs"], tol=0.1)
+    assert_unit_scale(out["grad_inputs"], tol=0.1)
+    for name, _ in utility.named_weights(layer):
+        assert_unit_scale(out[f"grad_{name}"], tol=0.1, err_msg=f"for grad_{name}")
+
+
+def test_layer_ffn():
+    layer = uscale.FFNLayer(2, (48723, 7428))
+    out = output_and_gradients(layer, (450, 200), seed=3742)
+    for key, value in out.items():
+        assert_unit_scale(value, tol=0.1, err_msg=f"for {key}")

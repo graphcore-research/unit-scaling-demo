@@ -229,6 +229,13 @@ def add_bias(features: tf.Tensor, bias: tf.Tensor) -> tf.Tensor:
     return features + scaling(backward=batch_size**-0.5)(bias)
 
 
+def multiply_scale(features: tf.Tensor, scale: tf.Tensor) -> tf.Tensor:
+    """Multiply by a scale tensor (which should be unit-initialized), with a scaled backward pass."""
+    assert len(scale.shape) == 1, "scale should be 1D"
+    batch_size = np.prod(features.shape[:-1])
+    return features * scaling(backward=batch_size**-0.5)(scale)
+
+
 def softmax_cross_entropy(
     scores: tf.Tensor, ids: tf.Tensor, mask: tf.Tensor
 ) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -379,3 +386,72 @@ class Embedding(layers.Embedding):
             scaling(backward=(self.table_size / batch_size) ** 0.5)(self.embeddings),
             inputs,
         )
+
+
+class LayerNormalization(keras.layers.Layer):  # type:ignore[misc]
+    """A scaled variant of keras.layers.LayerNormalization."""
+
+    def __init__(self, epsilon: float = 0.001):
+        super().__init__()
+        self.epsilon = epsilon
+        self.beta: tf.Variable = None
+        self.beta_initializer = keras.initializers.zeros()
+        self.gamma: tf.Variable = None
+        self.gamma_initializer = keras.initializers.ones()
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        self.beta = self.add_weight(
+            "beta", shape=input_shape[-1], initializer=self.beta_initializer
+        )
+        self.gamma = self.add_weight(
+            "gamma", shape=input_shape[-1], initializer=self.gamma_initializer
+        )
+
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        z = inputs - tf.reduce_mean(inputs, axis=-1, keepdims=True)
+        normed = z / tf.sqrt(tf.reduce_mean(z**2, axis=-1, keepdims=True))
+        return add_bias(multiply_scale(normed, self.gamma), self.beta)
+
+
+class PreNormResidualLayer(layers.PreNormResidualLayer):
+    """A scaled PreNorm residual layer.
+
+        y = sqrt(1 - alpha) * x + sqrt(alpha) * f(x)
+
+    `alpha` -- interpolation constant, higher to incorporate more of the
+               residual branch, lower to preserve the skip connection.
+
+    Note that this isn't quite a residual layer, as `x + f(x)` necessarily
+    increases variance.
+    """
+
+    def __init__(self, body: keras.layers.Layer, alpha: float):
+        super().__init__(body)
+        self.norm = LayerNormalization()
+        self.body = body
+        self.alpha = alpha
+
+    def call(self, x: tf.Tensor) -> tf.Tensor:
+        skip_weight = (1 - self.alpha) ** 0.5
+        residual_weight = self.alpha**0.5
+
+        return skip_weight * x + scaling(forward=residual_weight)(
+            self.body(self.norm(scaling(backward=residual_weight)(x)))
+        )
+
+
+class FFNLayer(layers.FFNLayer):
+    """A scaled FFN layer."""
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        hidden_size = input_shape[-1]
+        intermediate_size = int(self.multiple * hidden_size)
+        self.up = Dense(intermediate_size, seed=self.seeds[0])
+        self.up.build(input_shape[:-1] + (hidden_size,))
+        self.down = Dense(hidden_size, seed=self.seeds[1])
+        self.down.build(input_shape[:-1] + (intermediate_size,))
+
+    def call(self, x: tf.Tensor) -> tf.Tensor:
+        return self.down(relu(self.up(x)))  # type:ignore[misc]

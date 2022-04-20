@@ -19,6 +19,7 @@ def _test_settings(path: Path) -> experiments.Settings:
             hidden_size=64,
             depth=1,
             kernel_size=5,
+            group_size=64,
             vocab_size=None,  # type:ignore[arg-type]
             seed=None,  # type:ignore[arg-type]
         ),

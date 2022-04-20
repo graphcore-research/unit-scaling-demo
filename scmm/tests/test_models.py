@@ -12,8 +12,9 @@ SIMPLE_SETTINGS = models.SimpleConv(
     hidden_size=8,
     depth=2,
     kernel_size=5,
+    group_size=8,
 )
-SIMPLE_UNIT_SCALE_SETTINGS = dataclasses.replace(SIMPLE_SETTINGS, unit_scale=True)
+
 RESIDUAL_SETTINGS = models.ResidualConv(
     unit_scale=False,
     seed=100,
@@ -23,11 +24,19 @@ RESIDUAL_SETTINGS = models.ResidualConv(
     kernel_size=5,
     group_size=4,
     ffn_multiple=1.5,
+    residual_alpha=None,
 )
 
 
 @pytest.mark.parametrize(
-    "settings", [SIMPLE_SETTINGS, SIMPLE_UNIT_SCALE_SETTINGS, RESIDUAL_SETTINGS]
+    "settings",
+    [
+        SIMPLE_SETTINGS,
+        RESIDUAL_SETTINGS,
+        dataclasses.replace(SIMPLE_SETTINGS, unit_scale=True),
+        dataclasses.replace(RESIDUAL_SETTINGS, unit_scale=True, residual_alpha="mean"),
+        dataclasses.replace(RESIDUAL_SETTINGS, unit_scale=True, residual_alpha=0.2),
+    ],
 )
 def test_model(settings: models.Settings):
     batch_sequences = 3

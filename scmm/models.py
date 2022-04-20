@@ -1,7 +1,8 @@
 """Core model definitions."""
 
+import typing
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterator, List, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Tuple, Union
 
 import numpy as np
 import tensorflow as tf
@@ -21,6 +22,7 @@ class Settings:
     hidden_size: int
     depth: int
     kernel_size: int
+    group_size: int
 
 
 @dataclass
@@ -34,8 +36,8 @@ class SimpleConv(Settings):
 class ResidualConv(Settings):
     """A prenorm stack of causal grouped convolutions and pointwise FFNs."""
 
-    group_size: int
     ffn_multiple: float
+    residual_alpha: Union[str, float, None]
     kind: str = "residual_conv"
 
 
@@ -45,59 +47,76 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
         self.seeds = seeds
 
     def kernel_initializer(self) -> keras.initializers.Initializer:
+        assert not self.settings.unit_scale, "unit scale shouldn't use Glorot"
         return keras.initializers.GlorotUniform(seed=next(self.seeds))
 
     def embed(self) -> keras.layers.Layer:
+        if self.settings.unit_scale:
+            return uscale.Embedding(
+                self.settings.vocab_size,
+                self.settings.hidden_size,
+                seed=next(self.seeds),
+            )
         return layers.Embedding(
             self.settings.vocab_size, self.settings.hidden_size, seed=next(self.seeds)
         )
 
-    def trunk_layer(self) -> keras.layers.Layer:
-        if isinstance(self.settings, SimpleConv):
-            if self.settings.unit_scale:
-                return uscale.CausalConv1D(
-                    self.settings.hidden_size,
-                    kernel_size=self.settings.kernel_size,
-                    activation="relu",
-                    seed=next(self.seeds),
-                )
-            return keras.layers.Conv1D(
+    def conv(self) -> keras.layers.Layer:
+        if self.settings.unit_scale:
+            return uscale.CausalConv1D(
                 self.settings.hidden_size,
                 kernel_size=self.settings.kernel_size,
+                groups=self.settings.hidden_size // self.settings.group_size,
                 activation="relu",
-                padding="causal",
-                kernel_initializer=self.kernel_initializer(),
+                seed=next(self.seeds),
             )
+        return keras.layers.Conv1D(
+            self.settings.hidden_size,
+            kernel_size=self.settings.kernel_size,
+            groups=self.settings.hidden_size // self.settings.group_size,
+            activation="relu",
+            padding="causal",
+            kernel_initializer=self.kernel_initializer(),
+        )
+
+    def residual(self, body: keras.layers.Layer, index: int) -> keras.layers.Layer:
+        if self.settings.unit_scale:
+            settings = typing.cast(ResidualConv, self.settings)
+            if settings.residual_alpha == "mean":
+                alpha = 1 / (1 + index)
+            elif isinstance(settings.residual_alpha, (float, int)):
+                alpha = settings.residual_alpha
+            else:
+                assert False, f"unexpected residual_alpha {settings.residual_alpha}"
+            return uscale.PreNormResidualLayer(body, alpha=alpha)
+        return layers.PreNormResidualLayer(body)
+
+    def ffn(self) -> keras.layers.Layer:
+        settings = typing.cast(ResidualConv, self.settings)
+        cls = uscale.FFNLayer if settings.unit_scale else layers.FFNLayer
+        return cls(settings.ffn_multiple, seeds=(next(self.seeds), next(self.seeds)))
+
+    def trunk_layer(self, index: int) -> keras.layers.Layer:
+        if isinstance(self.settings, SimpleConv):
+            return self.conv()
 
         if isinstance(self.settings, ResidualConv):
-            assert (
-                not self.settings.unit_scale
-            ), "unit_scale unimplemented for ResidualConv"
             return layers.Isotropic(
-                conv=layers.PreNormResidualLayer(
-                    keras.layers.Conv1D(
-                        self.settings.hidden_size,
-                        kernel_size=self.settings.kernel_size,
-                        groups=self.settings.hidden_size // self.settings.group_size,
-                        padding="causal",
-                        kernel_initializer=self.kernel_initializer(),
-                    )
-                ),
-                ffn=layers.PreNormResidualLayer(
-                    layers.FFNLayer(
-                        self.settings.ffn_multiple,
-                        seeds=(next(self.seeds), next(self.seeds)),
-                    )
-                ),
+                conv=self.residual(self.conv(), index=2 * index),
+                ffn=self.residual(self.ffn(), index=2 * index + 1),
             )
+
         assert False, f"Unexpected model type {type(self.settings)}"
 
     def trunk(self) -> List[keras.layers.Layer]:
-        return [self.trunk_layer() for _ in range(self.settings.depth)]
+        return [self.trunk_layer(n) for n in range(self.settings.depth)]
 
-    @staticmethod
-    def norm() -> keras.layers.Layer:
-        return keras.layers.LayerNormalization()
+    def norm(self) -> keras.layers.Layer:
+        return (
+            keras.layers.LayerNormalization()
+            if self.settings.unit_scale
+            else uscale.LayerNormalization()
+        )
 
     def predict(self) -> keras.layers.Layer:
         if self.settings.unit_scale:
@@ -113,11 +132,9 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
     def loss(
         self,
     ) -> Callable[[tf.Tensor, tf.Tensor, tf.Tensor], Tuple[tf.Tensor, tf.Tensor]]:
-        return (
-            uscale.softmax_cross_entropy
-            if self.settings.unit_scale
-            else layers.softmax_cross_entropy
-        )
+        if self.settings.unit_scale:
+            return uscale.softmax_cross_entropy
+        return layers.softmax_cross_entropy
 
 
 class Model(keras.layers.Layer):  # type:ignore[misc]
