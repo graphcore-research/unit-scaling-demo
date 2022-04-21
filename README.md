@@ -22,5 +22,7 @@ python run_experiment.py
 | Weight Normalization [[arxiv](https://arxiv.org/abs/1602.07868)] | A differentiable reparameterisation for network parameters based on explicit normalisation and scaling. |
 | Centered Weight Normalization [[pdf](https://openaccess.thecvf.com/content_ICCV_2017/papers/Huang_Centered_Weight_Normalization_ICCV_2017_paper.pdf)] | Weight normalization with centering (zero mean). |
 | Weight Standardization [[arxiv](https://arxiv.org/abs/1903.10520)] | Centered Weight Normalization without a learnable length. |
-| Attention is all you need [[arxiv](https://arxiv.org/abs/1706.03762)] | Scaled dot product attention. |
+| Attention is all you need (Transformer) [[arxiv](https://arxiv.org/abs/1706.03762)] | Scaled dot product attention. |
 | Block-Normalized Gradient [[arxiv](https://arxiv.org/abs/1707.04822)] | Normalised weight update gradients (like LAMB). |
+| On the difficulty of training Recurrent Neural Networks [[arxiv](https://arxiv.org/abs/1211.5063)] | Gradient clipping and gradient norm regularisation. |
+| Path-SGD [[arxiv](https://arxiv.org/abs/1506.02617)] | Path regularization and a rescaling-invariant learning rule. |
