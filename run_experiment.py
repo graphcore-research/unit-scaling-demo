@@ -16,11 +16,13 @@ settings = S.experiments.Settings(
     model=S.models.ResidualConv(
         vocab_size=None,
         seed=None,
+        unit_scale=True,
         hidden_size=128,
         depth=8,
         kernel_size=7,
         ffn_multiple=4,
         group_size=16,
+        residual_alpha="mean",
     ),
     training=S.training.Settings(
         batch=S.datasets.BatchSettings(
@@ -28,8 +30,8 @@ settings = S.experiments.Settings(
         ),
         steps=int(1e6),
         valid_interval=int(1e4),
-        learning_rate=1e-3,
-        weight_decay=1e-3,
+        learning_rate=2**-6,
+        weight_decay=0,
     ),
     # target=S.pedal.xpu.CpuSettings(),
     target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(1e3)),
