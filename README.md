@@ -22,3 +22,4 @@ python run_experiment.py
 | Weight Normalization [[arxiv](https://arxiv.org/abs/1602.07868)] | A differentiable reparameterisation for network parameters based on explicit normalisation and scaling. |
 | Centered Weight Normalization [[pdf](https://openaccess.thecvf.com/content_ICCV_2017/papers/Huang_Centered_Weight_Normalization_ICCV_2017_paper.pdf)] | Weight normalization with centering (zero mean). |
 | Weight Standardization [[arxiv](https://arxiv.org/abs/1903.10520)] | Centered Weight Normalization without a learnable length. |
+| Attention is all you need [arxiv](https://arxiv.org/abs/1706.03762) | Scaled dot product attention. |
