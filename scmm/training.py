@@ -4,12 +4,36 @@ import dataclasses
 import datetime
 import itertools as it
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Union
 
 import tensorflow as tf
+from tensorflow import keras
 
 from . import datasets, layers, models
 from .pedal import xpu
+
+
+@dataclass
+class SgdM:
+    """SGD with momentum."""
+
+    learning_rate: float
+    momentum: float
+    kind: str = "sgdm"
+
+
+@dataclass
+class AdamW:
+    """Adam with weight decay."""
+
+    learning_rate: float
+    beta_1: float = 0.9
+    beta_2: float = 0.999
+    weight_decay: float = 0
+    kind: str = "adamw"
+
+
+Optimiser = Union[AdamW, SgdM]
 
 
 @dataclass
@@ -19,11 +43,7 @@ class Settings:
     batch: datasets.BatchSettings
     steps: int
     valid_interval: Optional[int]
-    learning_rate: float
-    beta_1: float = 0.9
-    beta_2: float = 0.999
-    weight_decay: float = 0
-    optimiser: str = "adamw"
+    optimiser: Optimiser
 
 
 def eval_summary(results: Iterable[datasets.Batch]) -> Dict[str, float]:
@@ -37,6 +57,22 @@ def eval_summary(results: Iterable[datasets.Batch]) -> Dict[str, float]:
     return dict(loss=loss / total_tokens, n_tokens=total_tokens)
 
 
+def _get_optimiser(settings: Optimiser) -> keras.optimizers.Optimizer:
+    if isinstance(settings, AdamW):
+        return layers.AdamW(
+            learning_rate=settings.learning_rate,
+            weight_decay=settings.weight_decay,
+            beta_1=settings.beta_1,
+            beta_2=settings.beta_2,
+        )
+    if isinstance(settings, SgdM):
+        return keras.optimizers.SGD(
+            learning_rate=settings.learning_rate,
+            momentum=settings.momentum,
+        )
+    assert False, f"unknown optimiser {settings}"
+
+
 def train(
     model: models.Model, data: datasets.Data, context: xpu.Context, settings: Settings
 ) -> Iterable[Dict[str, Any]]:
@@ -45,13 +81,8 @@ def train(
     assert (
         settings.batch.loop_seed is not None
     ), "please specify a seed for training batches"
-    assert settings.optimiser == "adamw"
-    optimiser = layers.AdamW(
-        learning_rate=settings.learning_rate,
-        weight_decay=settings.weight_decay,
-        beta_1=settings.beta_1,
-        beta_2=settings.beta_2,
-    )
+
+    optimiser = _get_optimiser(settings.optimiser)
 
     def _log(kind: str, step: int, data: Dict[str, Any]) -> Dict[str, Any]:
         return dict(kind=kind, step=step, time=datetime.datetime.now(), **data)
