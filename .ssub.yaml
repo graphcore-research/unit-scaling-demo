@@ -1,5 +1,5 @@
 project: scaled-matmuls
-sdk: 2.6.0-EA.1+930
+sdk: 2.6.0-EA.1+978
 exclude:
   - .git
   - .mypy_cache
