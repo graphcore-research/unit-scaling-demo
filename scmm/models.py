@@ -1,8 +1,8 @@
 """Core model definitions."""
 
-import typing
+import itertools as it
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterator, List, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow as tf
@@ -13,35 +13,47 @@ from .pedal import utility
 
 
 @dataclass
+class Residual:
+    """Residual settings."""
+
+    norm: Optional[str]  # None | "pre" | "post"
+    alpha: Union[None, str, float]  # None | "mean" | <float>
+
+
+@dataclass
+class Conv:
+    """Convolution (sequence mixing) settings."""
+
+    kernel_size: int
+    groups: int
+    kind = "conv"
+
+
+@dataclass
+class FFN:
+    """FFN (token mixing) settings."""
+
+    multiple: float
+    kind = "ffn"
+
+
+@dataclass
 class Settings:
     """Model configuration."""
 
-    unit_scale: bool
-    seed: int
     vocab_size: int
     hidden_size: int
     depth: int
-    kernel_size: int
-    group_size: int
-
-
-@dataclass
-class SimpleConv(Settings):
-    """A stack of causual convolutions with relu nonlinearity."""
-
-    kind: str = "simple_conv"
-
-
-@dataclass
-class ResidualConv(Settings):
-    """A prenorm stack of causal grouped convolutions and pointwise FFNs."""
-
-    ffn_multiple: float
-    residual_alpha: Union[str, float, None]
-    kind: str = "residual_conv"
+    residual: Optional[Residual]
+    sequence: Conv
+    token: Optional[FFN]
+    unit_scale: bool
+    seed: int
 
 
 class _ModelFactory:  # pylint:disable=missing-function-docstring
+    """Builds the various kinds of model from settings."""
+
     def __init__(self, settings: Settings, seeds: Iterator[int]):
         self.settings = settings
         self.seeds = seeds
@@ -66,55 +78,57 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
             ),
         )
 
-    def conv(self) -> keras.layers.Layer:
+    def sequence_layer(self) -> keras.layers.Layer:
         if self.settings.unit_scale:
             return uscale.CausalConv1D(
                 self.settings.hidden_size,
-                kernel_size=self.settings.kernel_size,
-                groups=self.settings.hidden_size // self.settings.group_size,
+                kernel_size=self.settings.sequence.kernel_size,
+                groups=self.settings.sequence.groups,
                 activation="relu",
                 seed=next(self.seeds),
             )
         return keras.layers.Conv1D(
             self.settings.hidden_size,
-            kernel_size=self.settings.kernel_size,
-            groups=self.settings.hidden_size // self.settings.group_size,
+            kernel_size=self.settings.sequence.kernel_size,
+            groups=self.settings.sequence.groups,
             activation="relu",
             padding="causal",
             kernel_initializer=self.kernel_initializer(),
         )
 
+    def token_layer(self) -> keras.layers.Layer:
+        assert self.settings.token is not None
+        cls = uscale.FFNLayer if self.settings.unit_scale else layers.FFNLayer
+        return cls(
+            self.settings.token.multiple, seeds=(next(self.seeds), next(self.seeds))
+        )
+
     def residual(self, body: keras.layers.Layer, index: int) -> keras.layers.Layer:
-        if self.settings.unit_scale:
-            settings = typing.cast(ResidualConv, self.settings)
-            if settings.residual_alpha == "mean":
-                alpha = 1 / (1 + index)
-            elif isinstance(settings.residual_alpha, (float, int)):
-                alpha = settings.residual_alpha
-            else:
-                assert False, f"unexpected residual_alpha {settings.residual_alpha}"
-            return uscale.PreNormResidualLayer(body, alpha=alpha)
-        return layers.PreNormResidualLayer(body)
+        if self.settings.residual is None:
+            return body
 
-    def ffn(self) -> keras.layers.Layer:
-        settings = typing.cast(ResidualConv, self.settings)
-        cls = uscale.FFNLayer if settings.unit_scale else layers.FFNLayer
-        return cls(settings.ffn_multiple, seeds=(next(self.seeds), next(self.seeds)))
+        if self.settings.residual.alpha is None:
+            alpha = None
+        elif self.settings.residual.alpha == "mean":
+            alpha = 1 / (1 + index)
+        elif isinstance(self.settings.residual.alpha, (float, int)):
+            alpha = self.settings.residual.alpha
+        else:
+            assert False, f"unexpected residual.alpha {self.settings.residual.alpha}"
 
-    def trunk_layer(self, index: int) -> keras.layers.Layer:
-        if isinstance(self.settings, SimpleConv):
-            return self.conv()
+        cls = uscale.ResidualLayer if self.settings.unit_scale else layers.ResidualLayer
+        return cls(body, norm_type=self.settings.residual.norm, alpha=alpha)
 
-        if isinstance(self.settings, ResidualConv):
-            return layers.Isotropic(
-                conv=self.residual(self.conv(), index=2 * index),
-                ffn=self.residual(self.ffn(), index=2 * index + 1),
-            )
-
-        assert False, f"Unexpected model type {type(self.settings)}"
+    def trunk_layer(self, index: Iterator[int]) -> keras.layers.Layer:
+        # Relying heavily on dict ordering...
+        parts = dict(sequence=self.residual(self.sequence_layer(), next(index)))
+        if self.settings.token:
+            parts["token"] = self.residual(self.token_layer(), next(index))
+        return layers.Isotropic(**parts)
 
     def trunk(self) -> List[keras.layers.Layer]:
-        return [self.trunk_layer(n) for n in range(self.settings.depth)]
+        index = iter(it.count())
+        return [self.trunk_layer(index) for _ in range(self.settings.depth)]
 
     def norm(self) -> keras.layers.Layer:
         return (
@@ -206,7 +220,7 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
         variables = dict(utility.named_weights(self))
         if variables.keys() != weights.keys():
             raise ValueError(
-                "Load does not set all weights"
+                "Load does not set correct weights"
                 f", extra: {weights.keys() - variables.keys()}"
                 f", missing: {variables.keys() - weights.keys()}"
             )

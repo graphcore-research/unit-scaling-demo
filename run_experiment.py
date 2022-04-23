@@ -1,7 +1,9 @@
+"""Run a single experiment."""
+
+import dataclasses
+import json
 import os
 from pathlib import Path
-import json
-import dataclasses
 
 import scmm as S
 
@@ -13,16 +15,15 @@ out, profile = None, None
 settings = S.experiments.Settings(
     # data=S.experiments.DataSettings(Path("scmm/tests/data"), kind="test"),
     data=S.experiments.DataSettings(Path("/home/research-datasets/wikitext103_raw")),
-    model=S.models.ResidualConv(
-        vocab_size=None,
-        seed=None,
-        unit_scale=True,
+    model=S.models.Settings(
         hidden_size=128,
         depth=8,
-        kernel_size=7,
-        ffn_multiple=4,
-        group_size=16,
-        residual_alpha="mean",
+        residual=S.models.Residual(norm="pre", alpha="mean"),
+        sequence=S.models.Conv(kernel_size=7, groups=8),
+        token=S.models.FFN(multiple=4),
+        unit_scale=True,
+        vocab_size=None,  # type:ignore[arg-type]
+        seed=None,  # type:ignore[arg-type]
     ),
     training=S.training.Settings(
         batch=S.datasets.BatchSettings(
@@ -30,8 +31,7 @@ settings = S.experiments.Settings(
         ),
         steps=int(1e6),
         valid_interval=int(1e4),
-        learning_rate=2**-6,
-        weight_decay=0,
+        optimiser=S.training.AdamW(learning_rate=2**-6),
     ),
     # target=S.pedal.xpu.CpuSettings(),
     target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(1e3)),
@@ -39,7 +39,7 @@ settings = S.experiments.Settings(
         wandb=True, log=out and out / "log.jsonl", checkpoint=out and out / "model.npz"
     ),
     metadata=dict(experiment="dev"),
-    seed=None,
+    seed=None,  # type:ignore[arg-type]
 )
 
 ####################

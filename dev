@@ -37,7 +37,7 @@ def cli(*args: Any, **kwargs: Any) -> Callable[[T], T]:
 
 # Commands
 
-SOURCE = [Path("scmm"), Path("dev")]
+SOURCE = [Path("scmm"), Path("dev"), Path("run_experiment.py")]
 
 
 def _sources(core: bool, script: bool, tests: bool) -> Iterable[Path]:

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pytest
@@ -17,8 +17,13 @@ def test_batched_gather():
     )
 
 
-def test_pre_norm_residual_layer():
-    layer = layers.PreNormResidualLayer(keras.layers.Dense(7))
+@pytest.mark.parametrize(
+    ["norm_type", "alpha"], [(None, 0.5), ("pre", None), ("post", 0.1)]
+)
+def test_residual_layer(norm_type: Optional[str], alpha: Optional[float]):
+    layer = layers.ResidualLayer(
+        keras.layers.Dense(7), norm_type=norm_type, alpha=alpha
+    )
     layer.build((None, None, 7))
     assert layer.body.kernel.shape == (7, 7)
     assert layer(tf.ones((2, 3, 7))).shape == (2, 3, 7)

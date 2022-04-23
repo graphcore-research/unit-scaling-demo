@@ -297,10 +297,16 @@ def test_layer_embedding():
     assert_unit_scale(grad_embeddings, tol=0.1)
 
 
-@pytest.mark.parametrize("alpha", [0.1, 0.9])
-def test_layer_prenorm_residual_v2(alpha: float):  # also tests LayerNormalization
-    layer = uscale.PreNormResidualLayer(uscale.Dense(150, seed=4832), alpha)
-    out = output_and_gradients(layer, (40, 19, 150), seed=2393)
+@pytest.mark.parametrize(
+    ["norm_type", "alpha"], [("pre", 0.1), ("post", 0.1), (None, 0.1), (None, 0.9)]
+)
+def test_layer_residual(
+    norm_type: Optional[str], alpha: float
+):  # also tests LayerNormalization
+    layer = uscale.ResidualLayer(
+        uscale.Dense(250, seed=4832), norm_type=norm_type, alpha=alpha
+    )
+    out = output_and_gradients(layer, (29, 19, 250), seed=2393)
     assert_unit_scale(out["outputs"], tol=0.1)
     assert_unit_scale(out["grad_inputs"], tol=0.1)
     for name, _ in utility.named_weights(layer):

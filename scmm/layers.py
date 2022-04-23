@@ -1,6 +1,6 @@
 """General purpose layers and functions."""
 
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple, Type
 
 import numpy as np
 import tensorflow as tf
@@ -32,21 +32,55 @@ def softmax_cross_entropy(
     return total_loss / tf.cast(n_ids, total_loss.dtype), n_ids
 
 
-class PreNormResidualLayer(keras.layers.Layer):  # type:ignore[misc]
-    """A PreNorm residual layer (https://aclanthology.org/P18-1008/)."""
+class ResidualLayer(keras.layers.Layer):  # type:ignore[misc]
+    """A residual layer, supporting PreNorm, PostNorm, NoNorm & interpolation.
 
-    def __init__(self, body: keras.layers.Layer):
+    norm_type -- None | "pre" | "post"
+
+    alpha -- None | <float>  -- interpolation constant, higher to incorporate
+                                more of the residual branch, lower to preserve
+                                the skip connection.
+
+        y = sqrt(1 - alpha) * x + sqrt(alpha) * f(x)
+    """
+
+    def __init__(
+        self,
+        body: keras.layers.Layer,
+        norm_type: Optional[str],
+        alpha: Optional[float],
+        norm_cls: Type[keras.layers.Layer] = keras.layers.LayerNormalization,
+    ):
         super().__init__()
-        self.norm = keras.layers.LayerNormalization()
         self.body = body
+        self.norm_type = norm_type
+        self.alpha = alpha
+        assert norm_type in {None, "pre", "post"}, f"unexpected norm_type {norm_type}"
+        self.norm_cls = norm_cls
+        self.norm: keras.layers.Layer = None
 
     def build(self, input_shape: tf.TensorShape) -> None:
         super().build(input_shape)
-        self.norm.build(input_shape)
         self.body.build(input_shape)
+        if self.norm_type is not None:
+            self.norm = self.norm_cls()
+            self.norm.build(input_shape)
 
     def call(self, x: tf.Tensor) -> tf.Tensor:
-        return x + self.body(self.norm(x))
+        branch = x
+        if self.norm_type == "pre":
+            branch = self.norm(branch)
+
+        branch = self.body(branch)
+
+        if self.alpha is not None:
+            y = (1 - self.alpha) ** 0.5 * x + self.alpha**0.5 * branch
+        else:
+            y = x + branch
+
+        if self.norm_type == "post":
+            y = self.norm(y)
+        return y
 
 
 class FFNLayer(keras.layers.Layer):  # type:ignore[misc]

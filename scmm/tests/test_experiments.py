@@ -14,12 +14,13 @@ from ..pedal import xpu
 def _test_settings(path: Path) -> experiments.Settings:
     return experiments.Settings(
         data=experiments.DataSettings(Path(__file__).parent / "data"),
-        model=models.SimpleConv(
-            unit_scale=True,
+        model=models.Settings(
             hidden_size=64,
             depth=1,
-            kernel_size=5,
-            group_size=64,
+            residual=None,
+            sequence=models.Conv(kernel_size=5, groups=1),
+            token=None,
+            unit_scale=True,
             vocab_size=None,  # type:ignore[arg-type]
             seed=None,  # type:ignore[arg-type]
         ),

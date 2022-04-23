@@ -13,14 +13,15 @@ def test_training(optimiser: training.Optimiser):
     data = datasets.Data(("a", "b", "c"), dict(train=data_sequence))
     with xpu.context(xpu.CpuSettings()) as context:
         model = models.Model(
-            models.SimpleConv(
-                unit_scale=False,
-                seed=100,
+            models.Settings(
                 vocab_size=len(data.vocab),
                 hidden_size=32,
                 depth=2,
-                kernel_size=2,
-                group_size=32,
+                residual=None,
+                sequence=models.Conv(2, groups=1),
+                token=None,
+                unit_scale=False,
+                seed=100,
             )
         )
         settings = training.Settings(

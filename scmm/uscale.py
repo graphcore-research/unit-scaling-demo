@@ -433,31 +433,31 @@ class LayerNormalization(keras.layers.Layer):  # type:ignore[misc]
         return add_bias(multiply_scale(normed, self.gamma), self.beta)
 
 
-class PreNormResidualLayer(layers.PreNormResidualLayer):
-    """A scaled PreNorm residual layer.
+class ResidualLayer(layers.ResidualLayer):
+    """A scaled residual layer."""
 
-        y = sqrt(1 - alpha) * x + sqrt(alpha) * f(x)
-
-    `alpha` -- interpolation constant, higher to incorporate more of the
-               residual branch, lower to preserve the skip connection.
-
-    Note that this isn't quite a residual layer, as `x + f(x)` necessarily
-    increases variance.
-    """
-
-    def __init__(self, body: keras.layers.Layer, alpha: float):
-        super().__init__(body)
-        self.norm = LayerNormalization()
-        self.body = body
-        self.alpha = alpha
+    def __init__(
+        self, body: keras.layers.Layer, norm_type: Optional[str], alpha: Optional[float]
+    ):
+        super().__init__(
+            body, norm_type=norm_type, alpha=alpha, norm_cls=LayerNormalization
+        )
 
     def call(self, x: tf.Tensor) -> tf.Tensor:
+        assert self.alpha is not None, "cannot use plain residual & preserve variance"
         skip_weight = (1 - self.alpha) ** 0.5
         residual_weight = self.alpha**0.5
 
-        return skip_weight * x + scaling(forward=residual_weight)(
-            self.body(self.norm(scaling(backward=residual_weight)(x)))
-        )
+        branch = scaling(backward=residual_weight)(x)
+        if self.norm_type == "pre":
+            branch = self.norm(branch)
+
+        branch = self.body(branch)
+        y = skip_weight * x + scaling(forward=residual_weight)(branch)
+
+        if self.norm_type == "post":
+            y = self.norm(y)
+        return y
 
 
 class FFNLayer(layers.FFNLayer):

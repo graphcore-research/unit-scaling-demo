@@ -5,37 +5,34 @@ import pytest
 
 from .. import models
 
-SIMPLE_SETTINGS = models.SimpleConv(
-    unit_scale=False,
-    seed=100,
+SETTINGS = models.Settings(
     vocab_size=100,
     hidden_size=8,
     depth=2,
-    kernel_size=5,
-    group_size=8,
-)
-
-RESIDUAL_SETTINGS = models.ResidualConv(
+    residual=None,
+    sequence=models.Conv(kernel_size=5, groups=1),
+    token=None,
     unit_scale=False,
     seed=100,
-    vocab_size=100,
-    hidden_size=8,
-    depth=2,
-    kernel_size=5,
-    group_size=4,
-    ffn_multiple=1.5,
-    residual_alpha=None,
 )
 
 
 @pytest.mark.parametrize(
     "settings",
     [
-        SIMPLE_SETTINGS,
-        RESIDUAL_SETTINGS,
-        dataclasses.replace(SIMPLE_SETTINGS, unit_scale=True),
-        dataclasses.replace(RESIDUAL_SETTINGS, unit_scale=True, residual_alpha="mean"),
-        dataclasses.replace(RESIDUAL_SETTINGS, unit_scale=True, residual_alpha=0.2),
+        SETTINGS,
+        dataclasses.replace(SETTINGS, residual=models.Residual(norm=None, alpha=0.2)),
+        dataclasses.replace(
+            SETTINGS,
+            residual=models.Residual(norm="pre", alpha=None),
+            token=models.FFN(multiple=1.5),
+        ),
+        dataclasses.replace(
+            SETTINGS,
+            residual=models.Residual(norm="post", alpha="mean"),
+            token=models.FFN(multiple=1.5),
+            unit_scale=True,
+        ),
     ],
 )
 def test_model(settings: models.Settings):
@@ -61,10 +58,8 @@ def test_model(settings: models.Settings):
 
 def test_model_load_save():
     # Change seed, expect different weights
-    base = models.Model(SIMPLE_SETTINGS)
-    other = models.Model(
-        dataclasses.replace(SIMPLE_SETTINGS, seed=SIMPLE_SETTINGS.seed + 1)
-    )
+    base = models.Model(SETTINGS)
+    other = models.Model(dataclasses.replace(SETTINGS, seed=SETTINGS.seed + 1))
     base_weights = base.save()
     other_weights = other.save()
     assert any(np.any(other_weights[k] != base_weights[k]) for k in base_weights)
