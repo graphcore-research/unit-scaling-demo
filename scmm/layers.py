@@ -137,7 +137,6 @@ class PadAndShiftLayer(keras.layers.Layer):  # type:ignore[misc]
         self.padding = self.add_weight(
             name="padding",
             shape=input_shape[-1],
-            dtype=self.dtype,
             initializer=keras.initializers.zeros,
         )
 
