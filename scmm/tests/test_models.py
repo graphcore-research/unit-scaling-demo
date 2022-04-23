@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from .. import models
+from ..pedal import xpu
 
 SETTINGS = models.Settings(
     vocab_size=100,
@@ -15,6 +16,12 @@ SETTINGS = models.Settings(
     unit_scale=False,
     seed=100,
 )
+
+
+@pytest.fixture
+def cpu_context():
+    with xpu.context(xpu.CpuSettings(compile=False)) as context:
+        yield context
 
 
 @pytest.mark.parametrize(
@@ -35,7 +42,7 @@ SETTINGS = models.Settings(
         ),
     ],
 )
-def test_model(settings: models.Settings):
+def test_model(cpu_context: xpu.Context, settings: models.Settings):
     batch_sequences = 3
     sequence_length = 12
     random = np.random.Generator(np.random.PCG64(200))
@@ -56,7 +63,7 @@ def test_model(settings: models.Settings):
     np.testing.assert_equal(model2.save(), model.save())
 
 
-def test_model_load_save():
+def test_model_load_save(cpu_context: xpu.Context):
     # Change seed, expect different weights
     base = models.Model(SETTINGS)
     other = models.Model(dataclasses.replace(SETTINGS, seed=SETTINGS.seed + 1))

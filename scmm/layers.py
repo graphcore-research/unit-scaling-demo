@@ -54,7 +54,8 @@ class ResidualLayer(keras.layers.Layer):  # type:ignore[misc]
         super().__init__()
         self.body = body
         self.norm_type = norm_type
-        self.alpha = alpha
+        self.alpha_value = alpha
+        self.alpha: tf.Variable = None
         assert norm_type in {None, "pre", "post"}, f"unexpected norm_type {norm_type}"
         self.norm_cls = norm_cls
         self.norm: keras.layers.Layer = None
@@ -65,6 +66,14 @@ class ResidualLayer(keras.layers.Layer):  # type:ignore[misc]
         if self.norm_type is not None:
             self.norm = self.norm_cls()
             self.norm.build(input_shape)
+        if self.alpha_value is not None:
+            # Turn alpha into a non-trainable variable, for sake of outlining
+            self.alpha = self.add_weight(
+                name="alpha",
+                shape=(),
+                initializer=keras.initializers.constant(self.alpha_value),
+                trainable=False,
+            )
 
     def call(self, x: tf.Tensor) -> tf.Tensor:
         branch = x

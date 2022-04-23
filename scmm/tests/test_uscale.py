@@ -309,8 +309,9 @@ def test_layer_residual(
     out = output_and_gradients(layer, (29, 19, 250), seed=2393)
     assert_unit_scale(out["outputs"], tol=0.1)
     assert_unit_scale(out["grad_inputs"], tol=0.1)
-    for name, _ in utility.named_weights(layer):
-        assert_unit_scale(out[f"grad_{name}"], tol=0.1, err_msg=f"for grad_{name}")
+    for name, variable in utility.named_weights(layer):
+        if variable.trainable:
+            assert_unit_scale(out[f"grad_{name}"], tol=0.1, err_msg=f"for grad_{name}")
 
 
 def test_layer_ffn():

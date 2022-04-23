@@ -9,7 +9,7 @@ import tensorflow as tf
 from tensorflow import keras
 
 from . import layers, uscale
-from .pedal import utility
+from .pedal import utility, xpu
 
 
 @dataclass
@@ -177,6 +177,9 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
         self.build((None, None))
         for _, layer in utility.named_layers(self):
             assert layer.built
+
+        for layer in self.trunk:
+            xpu.current_context().outline(layer)
 
     def build(self, input_shape: tf.TensorShape) -> None:
         super().build(input_shape)

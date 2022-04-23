@@ -1,12 +1,12 @@
 """General utilities to unify CPU/IPU programming."""
 
-import functools as ft
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, Callable, Dict, Iterable, Iterator, Optional, Type, Union
 
 import numpy as np
 import tensorflow as tf
+from tensorflow import keras
 
 try:
     from tensorflow.python import ipu
@@ -73,14 +73,14 @@ Settings = Union[CpuSettings, IpuSettings]
 class Context:
     """Manages target setup and a cache for compiled functions."""
 
+    _CURRENT: Optional["Context"] = None
+
     def __init__(
         self,
         strategy: tf.distribute.Strategy,
-        runner: Callable[..., Iterable[Batch]],
         compile: bool,  # pylint:disable=redefined-builtin
     ):
         self.strategy = strategy
-        self._runner = runner
         self._scope = self.strategy.scope()
         self._cache = (
             _make_cache(experimental_compile=True)
@@ -89,6 +89,8 @@ class Context:
         )
 
     def __enter__(self) -> "Context":
+        assert Context._CURRENT is None, "xpu.context scopes cannot be nested"
+        Context._CURRENT = self
         self._scope.__enter__()
         return self
 
@@ -99,6 +101,8 @@ class Context:
         exc_tb: Optional[TracebackType],
     ) -> None:
         self._scope.__exit__(exc_type, exc_val, exc_tb)
+        assert Context._CURRENT is self, "exiting a scope with the wrong context"
+        Context._CURRENT = None
 
     def loop(self, operation: Operation, inputs: Iterable[Batch]) -> Iterable[Batch]:
         """Stream inputs into an operation and return all outputs.
@@ -106,19 +110,24 @@ class Context:
         operation -- callable as `result = operation(**input)`,
                         where `result` is a `dict`
         """
-        return self._runner(
-            operation, inputs, strategy=self.strategy, cache=self._cache
-        )
+        return loop_cpu(operation, inputs, strategy=self.strategy, cache=self._cache)
+
+    @staticmethod
+    def outline(layer: keras.layers.Layer) -> None:
+        """Mark a layer for outlining on IPU, do nothing on CPU."""
 
 
 def context(settings: Settings) -> Context:
-    """Create an execution context with the given settings."""
+    """Create an execution context with the given settings.
+
+    Should generally be used in an immediate `with` scope, e.g.
+
+        with xpu.context(xpu.CpuSettings(compile=False)) as context:
+            ...
+            # also accessible as xpu.current_context()
+    """
     if isinstance(settings, CpuSettings):
-        return Context(
-            tf.distribute.OneDeviceStrategy(""),
-            loop_cpu,
-            compile=settings.compile,
-        )
+        return Context(tf.distribute.OneDeviceStrategy(""), compile=settings.compile)
     if isinstance(settings, IpuSettings):
         if not IPU:  # pragma: no cover
             raise ValueError(
@@ -126,6 +135,13 @@ def context(settings: Settings) -> Context:
             )
         return _create_ipu_context(settings)
     assert False, f"Unexpected Context settings type {settings}"
+
+
+def current_context() -> Context:
+    """Get the currently in-scope Context."""
+    # pylint:disable=protected-access
+    assert Context._CURRENT is not None, "there is no context in scope"
+    return Context._CURRENT
 
 
 def loop_cpu(
@@ -146,6 +162,35 @@ def loop_cpu(
 
 if IPU:
 
+    class _IpuContext(Context):
+        def __init__(self, settings: IpuSettings):
+            super().__init__(ipu.ipu_strategy.IPUStrategy(), compile=True)
+            self.settings = settings
+
+        def loop(
+            self, operation: Operation, inputs: Iterable[Batch]
+        ) -> Iterable[Batch]:
+            return loop_ipu(
+                operation,
+                inputs,
+                strategy=self.strategy,
+                cache=self._cache,
+                iterations_per_loop=self.settings.iterations_per_loop,
+            )
+
+        @staticmethod
+        def outline(layer: keras.layers.Layer) -> None:
+            inner_call = layer.call
+
+            def outlined_call(*args: Any, **kwargs: Any) -> Any:
+                @ipu.outlined_function  # type:ignore[misc]
+                def call() -> Any:
+                    return inner_call(*args, **kwargs)
+
+                return call()
+
+            layer.call = outlined_call
+
     def _create_ipu_context(settings: IpuSettings) -> Context:
         config = ipu.config.IPUConfig()
         config.auto_select_ipus = 1
@@ -154,11 +199,7 @@ if IPU:
                 settings.available_memory_proportion
             )
         ipu.utils.configure_ipu_system(config)
-        return Context(
-            ipu.ipu_strategy.IPUStrategy(),
-            ft.partial(loop_ipu, iterations_per_loop=settings.iterations_per_loop),
-            compile=True,
-        )
+        return _IpuContext(settings)
 
     def _padded_dataset(inputs: Iterable[Batch]) -> tf.data.Dataset:
         iterator = iter(inputs)

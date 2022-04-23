@@ -61,8 +61,8 @@ if profile:
         # Switch out the data to avoid a large delay "loading"
         data=S.experiments.DataSettings(Path("scmm/tests/data")),
         model=dataclasses.replace(settings.model, vocab_size=5008),
-        training=dataclasses.replace(settings.training, steps=1, valid_interval=None),
-        target=dataclasses.replace(settings.target, iterations_per_loop=int(1)),
+        training=dataclasses.replace(settings.training, steps=2, valid_interval=None),
+        target=dataclasses.replace(settings.target, iterations_per_loop=int(2)),
         output=S.experiments.OutputSettings(
             wandb=False, log=profile / "log.jsonl", checkpoint=None
         ),
