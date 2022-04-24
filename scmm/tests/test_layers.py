@@ -6,6 +6,7 @@ import tensorflow as tf
 from tensorflow import keras
 
 from .. import layers
+from ..pedal import utility
 
 
 def test_batched_gather():
@@ -69,6 +70,79 @@ def test_isotropic():
     assert layer.norm.built
     random = np.random.Generator(np.random.PCG64(seed=500))
     assert layer(random.normal(size=(7, 15))).shape == (7, 15)
+
+
+####################
+# Attention
+
+
+def test_sinusoid_embedding():
+    embedding = layers.sinusoid_embedding(
+        sequence_length=32, frequencies=6, max_period=16
+    )
+    assert embedding.shape == (32, 6)
+    np.testing.assert_allclose(embedding[:, 0], 0, atol=1e-6)
+    np.testing.assert_allclose(
+        embedding[:, 1], np.cos(np.pi * np.arange(32)), atol=1e-6
+    )
+    np.testing.assert_allclose(
+        embedding[:, -2], np.sin(2 * np.pi / 16 * np.arange(32)), atol=1e-6
+    )
+    np.testing.assert_allclose(
+        embedding[:, -1], np.cos(2 * np.pi / 16 * np.arange(32)), atol=1e-6
+    )
+
+
+def test_relative_causal_reshape():
+    scores = tf.constant(
+        [
+            [1, 2, 3, 4],
+            [11, 12, 13, 14],
+            [21, 22, 23, 24],
+            [31, 32, 33, 34],
+        ]
+    )
+    attention = layers.relative_causal_reshape(scores)
+    np.testing.assert_equal(
+        attention.numpy(),
+        [
+            [1, 0, 0, 0],
+            [12, 11, 0, 0],
+            [23, 22, 21, 0],
+            [34, 33, 32, 31],
+        ],
+    )
+
+
+def test_multi_head_attention():
+    random = np.random.Generator(np.random.PCG64(387232))
+    layer = layers.MultiHeadAttention(
+        heads=5, head_size=4, frequencies=13, max_period=16, seeds=(287, 918, 734)
+    )
+    inputs = random.normal(size=(11, 7, 8))
+    result = layer(inputs)
+
+    # Hard to check too much here - just make sure it's broadly sensible
+    assert result.shape == inputs.shape
+    np.testing.assert_array_less(np.std(result, axis=-1), 10)
+    assert {name: tuple(w.shape) for name, w in utility.named_weights(layer)} == dict(
+        qkv=(8, 3, 5, 4),
+        q_bias=(5, 4),
+        out=(5 * 4, 8),
+        out_bias=(8,),
+        positional=(13, 5, 4),
+    )
+
+    # Check out the causal masking, by perturbing inputs[i, i+1]
+    # in which case inputs[i, :i+1] should be unchanged
+    perturbed = layer(inputs + np.eye(11, 7, k=1)[..., np.newaxis])
+    mask = np.tril(np.ones((11, 7)), k=0)[..., np.newaxis]
+    np.testing.assert_allclose(perturbed * mask, result * mask)
+    assert not np.allclose(perturbed, result)
+
+
+####################
+# Optimizers
 
 
 def test_adamw():

@@ -98,7 +98,7 @@ class FFNLayer(keras.layers.Layer):  # type:ignore[misc]
     def __init__(self, multiple: float, seeds: Optional[Tuple[int, int]] = None):
         super().__init__()
         self.multiple = multiple
-        self.seeds = seeds if seeds else (None, None)
+        self.seeds = seeds or (None, None)
         self.up: Optional[keras.layers.Layer] = None  # pylint:disable=invalid-name
         self.down: Optional[keras.layers.Layer] = None
 
@@ -164,6 +164,154 @@ class Isotropic(keras.layers.Layer):  # type:ignore[misc]
         for layer in self._layers.values():
             outputs = layer(outputs)
         return outputs
+
+
+####################
+# Attention
+
+
+def sinusoid_embedding(
+    sequence_length: int, frequencies: int, max_period: int
+) -> np.ndarray:
+    """Generate a family of sin/cos embeddings.
+
+    See "Attention Is All You Need", Vaswani et al., section 3.5.
+
+    sequence_length -- output dimension (number of indices)
+
+    frequencies -- number of components to generate
+
+    max_period -- the period (in indices) of the lowest frequency component
+
+    returns -- array(sequence_length x frequencies)
+    """
+    index = np.arange(frequencies)
+    frequency = np.pi * (2 / max_period) ** ((index // 2) / (frequencies // 2 - 1))
+    phase = np.pi / 2 * (index % 2)
+    time = np.arange(sequence_length)
+    return np.sin(frequency * time[:, np.newaxis] + phase)
+
+
+def relative_causal_reshape(scores: tf.Tensor) -> tf.Tensor:
+    """Transform relative scores to an attention matrix.
+
+    Fills the lower-left quadrant of the result with scores
+
+        result[..., i, j] = scores[..., i, i - j]
+    """
+    sequence_length = scores.shape[-1]
+    ndim = len(scores.shape)
+
+    padded = tf.pad(scores[..., ::-1], [(0, 0)] * (ndim - 1) + [(0, sequence_length)])
+
+    # A reshaping and slicing trick to move to relative positions
+    tmp = tf.reshape(padded, padded.shape[:-2] + (2 * sequence_length**2,))
+    tmp = tmp[..., :-sequence_length]
+    tmp = tf.reshape(tmp, tmp.shape[:-1] + (sequence_length, 2 * sequence_length - 1))
+    tmp = tmp[..., sequence_length - 1 :]
+
+    return tmp
+
+
+class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
+    """Multi-head self attention a la Transformer.
+
+    With causal masking.
+
+    With relative-positional embeddings a la Transformer XL.
+    """
+
+    # pylint:disable=too-many-instance-attributes
+
+    def __init__(
+        self,
+        heads: int,
+        head_size: int,
+        frequencies: int,
+        max_period: int,
+        seeds: Tuple[int, int, int],
+    ):
+        super().__init__()
+        self.heads = heads
+        self.head_size = head_size
+        self.frequencies = frequencies
+        self.max_period = max_period
+        self.seeds = seeds
+        self.qkv: tf.Variable = None
+        self.q_bias: tf.Variable = None
+        self.out: tf.Variable = None
+        self.out_bias: tf.Variable = None
+        self.positional: tf.Variable = None
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        input_size = input_shape[-1]
+        qkv_scale = np.sqrt(3) * input_size**-0.5
+        self.qkv = self.add_weight(
+            name="qkv",
+            shape=(input_size, 3, self.heads, self.head_size),
+            initializer=keras.initializers.random_uniform(
+                -qkv_scale, qkv_scale, seed=self.seeds[0]
+            ),
+        )
+        self.q_bias = self.add_weight(
+            name="q_bias",
+            shape=(self.heads, self.head_size),
+            initializer=keras.initializers.zeros(),
+        )
+        output_scale = np.sqrt(3) * (self.heads * self.head_size) ** -0.5
+        self.out = self.add_weight(
+            name="out",
+            shape=(self.heads * self.head_size, input_size),
+            initializer=keras.initializers.random_uniform(
+                -output_scale, output_scale, seed=self.seeds[1]
+            ),
+        )
+        self.out_bias = self.add_weight(
+            name="out_bias",
+            shape=input_size,
+            initializer=keras.initializers.zeros(),
+        )
+        positional_scale = np.sqrt(3) * self.frequencies**-0.5
+        self.positional = self.add_weight(
+            name="positional",
+            shape=(self.frequencies, self.heads, self.head_size),
+            initializer=keras.initializers.random_uniform(
+                -positional_scale, positional_scale, seed=self.seeds[2]
+            ),
+        )
+
+    @staticmethod
+    def _causal_mask(attention: tf.Tensor) -> tf.Tensor:
+        sequence_length = attention.shape[-1]
+        return tf.constant(
+            np.triu(np.full((sequence_length, sequence_length), -1000), k=1),
+            dtype=attention.dtype,
+        )
+
+    def _positional_mask(self, query: tf.Tensor) -> tf.Tensor:
+        sequence_length = query.shape[-2]
+        sins = tf.constant(
+            sinusoid_embedding(sequence_length, self.frequencies, self.max_period),
+            dtype=query.dtype,
+        )
+        embeddings = tf.einsum("sf,fnh->nsh", sins, self.positional)
+        scores = tf.einsum("bnqh,nvh->bnqv", query, embeddings)
+        return relative_causal_reshape(scores)
+
+    def call(self, input: tf.Tensor) -> tf.Tensor:  # pylint:disable=redefined-builtin
+        # pylint:disable=invalid-name
+        q, k, v = tf.unstack(tf.einsum("bsx,xAnh -> Abnsh", input, self.qkv))
+        q += self.q_bias[:, tf.newaxis, :]
+        a = tf.einsum("bnqh,bnkh->bnqk", q, k) * self.head_size**-0.5
+        a += self._positional_mask(q)
+        a += self._causal_mask(a)
+        a = tf.nn.softmax(a, axis=-1)
+        o = tf.einsum("bnqk,bnkh->bqnh", a, v)
+        return (
+            tf.reshape(o, o.shape[:-2] + (self.out.shape[0],)) @ self.out
+            + self.out_bias
+        )
 
 
 ####################

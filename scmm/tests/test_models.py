@@ -28,10 +28,16 @@ def cpu_context():
     "settings",
     [
         SETTINGS,
-        dataclasses.replace(SETTINGS, residual=models.Residual(norm=None, alpha=0.2)),
+        dataclasses.replace(
+            SETTINGS,
+            residual=models.Residual(norm=None, alpha=0.2),
+        ),
         dataclasses.replace(
             SETTINGS,
             residual=models.Residual(norm="pre", alpha=None),
+            sequence=models.Attention(
+                heads=2, head_size=4, frequencies=16, max_period=16
+            ),
             token=models.FFN(multiple=1.5),
         ),
         dataclasses.replace(

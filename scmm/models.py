@@ -26,7 +26,18 @@ class Conv:
 
     kernel_size: int
     groups: int
-    kind = "conv"
+    kind: str = "conv"
+
+
+@dataclass
+class Attention:
+    """Attention (sequence mixing) settings."""
+
+    heads: int
+    head_size: int
+    frequencies: int
+    max_period: int
+    kind: str = "attention"
 
 
 @dataclass
@@ -34,7 +45,7 @@ class FFN:
     """FFN (token mixing) settings."""
 
     multiple: float
-    kind = "ffn"
+    kind: str = "ffn"
 
 
 @dataclass
@@ -45,7 +56,7 @@ class Settings:
     hidden_size: int
     depth: int
     residual: Optional[Residual]
-    sequence: Conv
+    sequence: Union[Conv, Attention]
     token: Optional[FFN]
     unit_scale: bool
     seed: int
@@ -78,23 +89,40 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
             ),
         )
 
-    def sequence_layer(self) -> keras.layers.Layer:
+    def conv(self, settings: Conv) -> keras.layers.Layer:
         if self.settings.unit_scale:
             return uscale.CausalConv1D(
                 self.settings.hidden_size,
-                kernel_size=self.settings.sequence.kernel_size,
-                groups=self.settings.sequence.groups,
+                kernel_size=settings.kernel_size,
+                groups=settings.groups,
                 activation="relu",
                 seed=next(self.seeds),
             )
         return keras.layers.Conv1D(
             self.settings.hidden_size,
-            kernel_size=self.settings.sequence.kernel_size,
-            groups=self.settings.sequence.groups,
+            kernel_size=settings.kernel_size,
+            groups=settings.groups,
             activation="relu",
             padding="causal",
             kernel_initializer=self.kernel_initializer(),
         )
+
+    def attention(self, settings: Attention) -> keras.layers.Layer:
+        assert not self.settings.unit_scale, "not implemented"
+        return layers.MultiHeadAttention(
+            heads=settings.heads,
+            head_size=settings.head_size,
+            frequencies=settings.frequencies,
+            max_period=settings.max_period,
+            seeds=(next(self.seeds), next(self.seeds), next(self.seeds)),
+        )
+
+    def sequence_layer(self) -> keras.layers.Layer:
+        if isinstance(self.settings.sequence, Conv):
+            return self.conv(self.settings.sequence)
+        if isinstance(self.settings.sequence, Attention):
+            return self.attention(self.settings.sequence)
+        assert False, f"unexpected sequence settings {self.settings.sequence}"
 
     def token_layer(self) -> keras.layers.Layer:
         assert self.settings.token is not None
