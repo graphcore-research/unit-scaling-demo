@@ -239,9 +239,8 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
         self.seeds = seeds
         self.qkv: tf.Variable = None
         self.q_bias: tf.Variable = None
-        self.out: tf.Variable = None
-        self.out_bias: tf.Variable = None
         self.positional: tf.Variable = None
+        self.out: keras.layers.Layer = None
 
     def build(self, input_shape: tf.TensorShape) -> None:
         super().build(input_shape)
@@ -259,27 +258,19 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
             shape=(self.heads, self.head_size),
             initializer=keras.initializers.zeros(),
         )
-        output_scale = np.sqrt(3) * (self.heads * self.head_size) ** -0.5
-        self.out = self.add_weight(
-            name="out",
-            shape=(self.heads * self.head_size, input_size),
-            initializer=keras.initializers.random_uniform(
-                -output_scale, output_scale, seed=self.seeds[1]
-            ),
-        )
-        self.out_bias = self.add_weight(
-            name="out_bias",
-            shape=input_size,
-            initializer=keras.initializers.zeros(),
-        )
         positional_scale = np.sqrt(3) * self.frequencies**-0.5
         self.positional = self.add_weight(
             name="positional",
             shape=(self.frequencies, self.heads, self.head_size),
             initializer=keras.initializers.random_uniform(
-                -positional_scale, positional_scale, seed=self.seeds[2]
+                -positional_scale, positional_scale, seed=self.seeds[1]
             ),
         )
+        self.out = keras.layers.Dense(
+            input_size,
+            kernel_initializer=keras.initializers.GlorotUniform(seed=self.seeds[2]),
+        )
+        self.out.build(input_shape[:-1] + (self.heads * self.head_size,))
 
     @staticmethod
     def _causal_mask(attention: tf.Tensor) -> tf.Tensor:
@@ -296,7 +287,7 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
             dtype=query.dtype,
         )
         embeddings = tf.einsum("sf,fnh->nsh", sins, self.positional)
-        scores = tf.einsum("bnqh,nvh->bnqv", query, embeddings)
+        scores = tf.einsum("bnqh,nvh->bnqv", query, embeddings) * self.head_size**-0.5
         return relative_causal_reshape(scores)
 
     def call(self, input: tf.Tensor) -> tf.Tensor:  # pylint:disable=redefined-builtin
@@ -308,10 +299,7 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
         a += self._causal_mask(a)
         a = tf.nn.softmax(a, axis=-1)
         o = tf.einsum("bnqk,bnkh->bqnh", a, v)
-        return (
-            tf.reshape(o, o.shape[:-2] + (self.out.shape[0],)) @ self.out
-            + self.out_bias
-        )
+        return self.out(tf.reshape(o, o.shape[:-2] + (self.head_size * self.heads,)))
 
 
 ####################

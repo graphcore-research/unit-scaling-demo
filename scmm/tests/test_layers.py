@@ -125,13 +125,13 @@ def test_multi_head_attention():
     # Hard to check too much here - just make sure it's broadly sensible
     assert result.shape == inputs.shape
     np.testing.assert_array_less(np.std(result, axis=-1), 10)
-    assert {name: tuple(w.shape) for name, w in utility.named_weights(layer)} == dict(
-        qkv=(8, 3, 5, 4),
-        q_bias=(5, 4),
-        out=(5 * 4, 8),
-        out_bias=(8,),
-        positional=(13, 5, 4),
-    )
+    assert {name: tuple(w.shape) for name, w in utility.named_weights(layer)} == {
+        "qkv": (8, 3, 5, 4),
+        "q_bias": (5, 4),
+        "positional": (13, 5, 4),
+        "out.kernel": (5 * 4, 8),
+        "out.bias": (8,),
+    }
 
     # Check out the causal masking, by perturbing inputs[i, i+1]
     # in which case inputs[i, :i+1] should be unchanged

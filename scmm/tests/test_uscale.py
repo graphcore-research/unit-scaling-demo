@@ -246,13 +246,11 @@ def output_and_gradients(
     with tf.GradientTape() as tape:
         tape.watch(inputs)
         outputs = layer(inputs)
-    output_gradients = random.normal(size=outputs.shape).astype(np.float32)
+    grad_outputs = random.normal(size=outputs.shape).astype(np.float32)
     gradient_tensors = {f"grad_{k}": v for k, v in utility.named_weights(layer)}
     gradient_tensors["grad_inputs"] = inputs
-    gradients = tape.gradient(outputs, gradient_tensors, output_gradients)
-    return dict(
-        inputs=inputs, outputs=outputs, output_gradients=output_gradients, **gradients
-    )
+    gradients = tape.gradient(outputs, gradient_tensors, grad_outputs)
+    return dict(inputs=inputs, outputs=outputs, grad_outputs=grad_outputs, **gradients)
 
 
 def test_layer_dense():
