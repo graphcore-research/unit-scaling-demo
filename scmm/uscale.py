@@ -166,12 +166,12 @@ def scaling(
                         dense_shape=upstream.dense_shape,
                     )
                 else:
-                    grad_input *= backward
+                    grad_input = grad_input * backward
             return grad_input
 
         output = input
         if forward is not None:
-            output *= forward
+            output = output * forward
 
         return output, grad
 
