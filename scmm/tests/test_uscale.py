@@ -74,6 +74,15 @@ def test_activation_tracker_embedding_gradient():
     )
 
 
+def test_printing(capsys):
+    with tf.GradientTape() as tape:
+        x = tf.constant([0, 1, 0, 1], dtype=tf.float32)
+        tape.watch(x)
+        y = tf.reduce_sum(uscale.printing("x")(x) ** 2)
+    tape.gradient(y, x)
+    assert capsys.readouterr().err == "x forward std 0.5\nx backward std 1.0\n"
+
+
 ####################
 # Ops
 
@@ -111,11 +120,6 @@ def assert_unit_scale(value: np.ndarray, tol: float, err_msg: str = "") -> None:
     np.testing.assert_allclose(np.std(value), 1, atol=tol, err_msg=err_msg)
 
 
-def assert_all_unit_scale(values: Dict[str, np.ndarray], tol: float) -> None:
-    for k in values:
-        assert_unit_scale(values[k], tol=tol, err_msg=f"for {k}")
-
-
 def check_op(
     scaled: Callable[..., tf.Tensor],
     reference: Callable[..., tf.Tensor],
@@ -144,10 +148,6 @@ def check_op(
         reference_out = reference(**inputs, **(extra_args or {}))
     reference_grad = tape.gradient(reference_out, inputs, output_grad)
 
-    assert_unit_scale(scaled_out, tol=0.1)
-    for arg in scaled_grad:
-        assert_unit_scale(scaled_grad[arg], tol=0.1, err_msg=f"for grad {arg}")
-
     assert_scaled_allclose(
         scaled_out - shifted * np.mean(scaled_out),
         reference_out - shifted * np.mean(reference_out),
@@ -159,72 +159,74 @@ def check_op(
         )
 
     return dict(
-        scaled_out=scaled_out,
-        scaled_grad=scaled_grad,
+        out=scaled_out,
+        grad=scaled_grad,
         reference_out=reference_out,
         reference_grad=reference_grad,
     )
 
 
-def test_op_relu():
-    out = check_op(
-        uscale.relu, tf.nn.relu, seed=100, args=dict(features=(1000,)), shifted=True
-    )
-    np.testing.assert_allclose(np.mean(out["scaled_out"]), 0, atol=0.1)  # centered
-
-
 def test_op_add_bias():
-    check_op(
+    out = check_op(
         uscale.add_bias,
         lambda features, bias: features + bias,
         seed=842,
         args=dict(features=(1000,), bias=np.zeros(1000, dtype=np.float32)),
     )
+    assert_unit_scale(out["grad"]["bias"], tol=0.05)
 
 
 def test_op_multiply_scale():
-    check_op(
+    out = check_op(
         uscale.multiply_scale,
         lambda features, scale: features * scale,
         seed=2345,
         args=dict(features=(1000,), scale=np.ones(1000, dtype=np.float32)),
     )
+    assert_unit_scale(out["grad"]["scale"], tol=0.05)
 
 
-def test_activations():
-    x = tf.constant([-1, 0, 1], dtype=tf.float32)
-    np.testing.assert_allclose(uscale.activations.get("linear")(x), x)
-    assert uscale.activations.get(None) is uscale.activations.linear
-    assert uscale.activations.get("relu") is uscale.activations.relu
-
-
-def test_op_matmul():
-    check_op(uscale.matmul, tf.matmul, seed=200, args=dict(a=(100, 200), b=(200, 300)))
-    check_op(
-        uscale.matmul, tf.matmul, seed=300, args=dict(a=(3, 99, 150), b=(150, 130))
+def test_op_pointwise():
+    out = check_op(
+        uscale.pointwise,
+        lambda inputs, weights: tf.matmul(  # pylint:disable=unnecessary-lambda
+            inputs, weights
+        ),
+        seed=300,
+        args=dict(inputs=(3, 99, 150), weights=(150, 110)),
     )
+    np.testing.assert_allclose(
+        np.std(out["out"]) * np.std(out["grad"]["inputs"]), 1, atol=0.05
+    )
+    assert_unit_scale(out["grad"]["weights"], tol=0.05)
 
 
 def test_op_conv1d():
     for padding in ["SAME", "VALID"]:
-        check_op(
+        # We're a bit sloppy about padding when using "SAME"
+        out = check_op(
             uscale.conv1d,
             ft.partial(tf.nn.conv1d, stride=1),
             seed=400,
-            args=dict(input=(50, 17, 64), filters=(5, 64, 128)),
+            args=dict(input=(50, 27, 96), filters=(5, 96, 128)),
             extra_args=dict(padding=padding),
         )
+        np.testing.assert_allclose(
+            np.std(out["out"]) * np.std(out["grad"]["input"]), 1, atol=0.1
+        )
+        assert_unit_scale(out["grad"]["filters"], tol=0.1)
 
 
 def test_op_softmax_cross_entropy():
+    batch_size, sequence_length, n_classes = (10, 20, 5)
     random = np.random.Generator(np.random.PCG64(seed=1000))
-    scores = tf.constant(random.normal(size=(10, 5)))
-    ids = tf.constant(random.integers(scores.shape[1], size=scores.shape[0]))
+    scores = tf.constant(random.normal(size=(batch_size, sequence_length, n_classes)))
+    ids = tf.constant(random.integers(n_classes, size=(batch_size, sequence_length)))
     with tf.GradientTape() as tape:
         tape.watch(scores)
         loss, n_ids = uscale.softmax_cross_entropy(scores, ids, tf.ones_like(ids))
-    assert int(n_ids) == scores.shape[0]
-    assert 0 < float(loss) < 2 * np.log(5)
+    assert int(n_ids) == batch_size * sequence_length
+    assert 0 < float(loss) < 2 * np.log(n_classes)
     grad_scores = tape.gradient(loss, scores)
     assert_unit_scale(grad_scores, 0.1)
 
@@ -255,16 +257,26 @@ def output_and_gradients(
 
 def test_layer_dense():
     layer = uscale.Dense(200, seed=123)
-    out = output_and_gradients(layer, (100, 150), seed=456)
-    assert out["outputs"].shape == (100, 200)
-    assert_all_unit_scale(out, tol=0.1)
+    out = output_and_gradients(layer, (150, 100), seed=456)
+    assert out["outputs"].shape == (150, 200)
+    np.testing.assert_allclose(
+        np.std(out["outputs"]) * np.std(out["grad_inputs"]), 1, atol=0.01
+    )
+    assert_unit_scale(out["grad_kernel"], 0.01)
+    assert_unit_scale(out["grad_bias"], 0.01)
 
 
 def test_layer_causalconv1d():
-    layer = uscale.CausalConv1D(filters=200, kernel_size=7, seed=321)
+    # Choose kernel size << sequence length to reduce the effect of padding
+    # (which we don't account for in variance preservation)
+    layer = uscale.CausalConv1D(filters=200, kernel_size=3, seed=321)
     out = output_and_gradients(layer, (30, 19, 100), seed=654)
     assert out["outputs"].shape == (30, 19, 200)
-    assert_all_unit_scale(out, tol=0.1)
+    np.testing.assert_allclose(
+        np.std(out["outputs"]) * np.std(out["grad_inputs"]), 1, atol=0.1
+    )
+    assert_unit_scale(out["grad_kernel"], 0.05)
+    assert_unit_scale(out["grad_bias"], 0.05)
 
     with pytest.raises(ValueError) as error:
         uscale.CausalConv1D(filters=16, kernel_size=5, groups=3)
@@ -313,7 +325,13 @@ def test_layer_residual(
 
 
 def test_layer_ffn():
+    random = np.random.Generator(np.random.PCG64(seed=200))
     layer = uscale.FFNLayer(2, (48723, 7428))
-    out = output_and_gradients(layer, (450, 200), seed=3742)
-    for key, value in out.items():
-        assert_unit_scale(value, tol=0.1, err_msg=f"for {key}")
+    output = layer(random.normal(size=(5, 6, 7)))
+    assert output.shape == (5, 6, 7)
+    assert {k: v.shape for k, v in utility.named_weights(layer)} == {
+        "up.kernel": (7, 14),
+        "up.bias": (14,),
+        "down.kernel": (14, 7),
+        "down.bias": (7,),
+    }

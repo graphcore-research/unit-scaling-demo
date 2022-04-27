@@ -144,8 +144,10 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
         else:
             assert False, f"unexpected residual.alpha {self.settings.residual.alpha}"
 
-        cls = uscale.ResidualLayer if self.settings.unit_scale else layers.ResidualLayer
-        return cls(body, norm_type=self.settings.residual.norm, alpha=alpha)
+        layer_cls = (
+            uscale.ResidualLayer if self.settings.unit_scale else layers.ResidualLayer
+        )
+        return layer_cls(body, norm_type=self.settings.residual.norm, alpha=alpha)
 
     def trunk_layer(self, index: Iterator[int]) -> keras.layers.Layer:
         # Relying heavily on dict ordering...
@@ -160,14 +162,16 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
 
     def norm(self) -> keras.layers.Layer:
         return (
-            keras.layers.LayerNormalization()
+            uscale.LayerNormalization()
             if self.settings.unit_scale
-            else uscale.LayerNormalization()
+            else keras.layers.LayerNormalization()
         )
 
     def predict(self) -> keras.layers.Layer:
         if self.settings.unit_scale:
-            return uscale.Dense(self.settings.vocab_size, seed=next(self.seeds))
+            return uscale.Dense(
+                self.settings.vocab_size, scale_for="backward", seed=next(self.seeds)
+            )
         return keras.layers.Dense(
             self.settings.vocab_size, kernel_initializer=self.kernel_initializer()
         )
@@ -222,6 +226,7 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
 
     def run(self, tokens: tf.Tensor, mask: tf.Tensor) -> Dict[str, tf.Tensor]:
         """Run the language model for cross entropy loss."""
+
         hiddens = self.embed(tokens)
         for layer in self.trunk:
             hiddens = layer(hiddens)

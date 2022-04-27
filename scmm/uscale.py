@@ -2,6 +2,7 @@
 
 import collections
 import functools
+import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -139,6 +140,32 @@ class ActivationTracker:
         )
 
 
+def printing(
+    name: str, summary: Callable[[tf.Tensor], Any] = np.std
+) -> Callable[[tf.Tensor], tf.Tensor]:
+    """Utility for printing forward/backward pass statistics.
+
+    E.g.
+        x = printing("x")(x)
+    """
+
+    @tf.custom_gradient  # type:ignore[misc]
+    def operation(x: tf.Tensor) -> tf.Tensor:
+        print(f"{name} forward {summary.__name__}", summary(x), file=sys.stderr)
+
+        def grad(upstream: tf.Tensor) -> tf.Tensor:
+            print(
+                f"{name} backward {summary.__name__}",
+                summary(upstream),
+                file=sys.stderr,
+            )
+            return upstream
+
+        return x, grad
+
+    return operation  # type:ignore[no-any-return]
+
+
 ####################
 # Ops
 
@@ -178,16 +205,35 @@ def scaling(
     return operation  # type:ignore[no-any-return]
 
 
-def matmul(a: tf.Tensor, b: tf.Tensor) -> tf.Tensor:
-    """Scaling version of tf.matmul (where b must be 2D)."""
-    assert len(b.shape) == 2, "matmul requires 2D rhs (argument `b`)"
+def pointwise(
+    inputs: tf.Tensor, weights: tf.Tensor, scale_for: str = "both"
+) -> tf.Tensor:
+    """A scaled pointwise transformation.
 
-    input_size, output_size = b.shape
-    batch_size = np.prod(a.shape[:-1])
+    inputs -- activations, will receive consistent gradients between forward & backward passes
 
-    a = scaling(backward=output_size**-0.5)(a)
-    b = scaling(backward=batch_size**-0.5)(b)
-    return scaling(forward=input_size**-0.5)(a @ b)
+    weights -- will receive scaled gradients
+
+    scale_for -- "forward" | "backward" | "both" -- how should the forward/backward-inputs
+                 pass scale be chosen?
+
+                "forward" -- preserve variance in the forward pass
+                "backward" -- preserve variance in the backward pass
+                "both" -- trade off forward and backward pass variance
+    """
+    assert len(weights.shape) == 2, "pointwise requires 2D rhs `weights`"
+
+    input_size, output_size = weights.shape
+    # Note "both" is different from Glorot's sqrt(2 / (input_size + output_size)), as this
+    # should preserves scale better after boom_down(boom_up(x))
+    forward_scale = dict(
+        forward=input_size**-0.5,
+        backward=output_size**-0.5,
+        both=(input_size * output_size) ** -0.25,
+    )[scale_for]
+    backward_scale = np.prod(inputs.shape[:-1]) ** -0.5
+
+    return inputs @ scaling(forward=forward_scale, backward=backward_scale)(weights)
 
 
 def conv1d(
@@ -196,6 +242,7 @@ def conv1d(
     padding: str,
 ) -> tf.Tensor:
     """Scaling version of tf.nn.conv1d."""
+    # pylint:disable=too-many-locals
     *batch_shape, input_length, input_size = input.shape
     filter_width, filter_input_size, output_size = filters.shape
 
@@ -206,19 +253,16 @@ def conv1d(
     n_groups = input_size // filter_input_size
     batch_size = np.prod(batch_shape)
 
-    input = scaling(
-        backward=(filter_width * output_length / input_length * output_size // n_groups)
-        ** -0.5
-    )(input)
-    filters = scaling(backward=(output_length * batch_size) ** -0.5)(filters)
-    output = tf.nn.conv1d(input, filters, stride=1, padding=padding)
-    return scaling(forward=(filter_width * input_size // n_groups) ** -0.5)(output)
+    forward_contraction = filter_width * input_size // n_groups
+    backward_contraction = filter_width * output_size // n_groups
+    forward_scale = (forward_contraction * backward_contraction) ** -0.25
+    backward_scale = (output_length * batch_size) ** -0.5
 
-
-def relu(features: tf.Tensor) -> tf.Tensor:
-    """A scaled ReLU nonlinearity, shifted to have zero mean for unit normal inputs."""
-    return scaling(forward=np.sqrt(2 / (1 - 1 / np.pi)), backward=np.sqrt(2))(
-        tf.nn.relu(features) - 1 / np.sqrt(2 * np.pi)
+    return tf.nn.conv1d(
+        input,
+        scaling(forward=forward_scale, backward=backward_scale)(filters),
+        stride=1,
+        padding=padding,
     )
 
 
@@ -246,12 +290,12 @@ def softmax_cross_entropy(
 
     returns -- (average_loss, n_items)
     """
-    logp = tf.nn.log_softmax(scores)
+    logp = tf.nn.log_softmax(scores, axis=-1)
     # Better compilation on IPU vs `tf.gather(logp, ids, batch_dims=2)`
     target_logp = layers.batched_gather(logp, ids)
     total_loss = tf.reduce_sum(tf.cast(mask, target_logp.dtype) * -target_logp)
     n_ids = tf.reduce_sum(tf.cast(mask, tf.int32))
-    n_classes = scores.shape[1]
+    n_classes = scores.shape[-1]
     loss = scaling(backward=np.prod(mask.shape) * n_classes / np.sqrt(n_classes - 1))(
         total_loss / tf.cast(n_ids, total_loss.dtype)
     )
@@ -276,31 +320,24 @@ class initializers:  # pylint:disable=invalid-name
         return keras.initializers.RandomNormal(stddev=1, seed=seed)
 
 
-class activations:  # pylint:disable=invalid-name,too-few-public-methods
-    """Unit-variance activations."""
-
-    linear = staticmethod(tf.identity)
-    relu = staticmethod(relu)
-
-    @classmethod
-    def get(cls, name: Optional[str]) -> Callable[[tf.Tensor], tf.Tensor]:
-        """Select an activation function by name (default: linear)."""
-        return getattr(cls, name or "linear")  # type:ignore[no-any-return]
-
-
 class Dense(keras.layers.Layer):  # type:ignore[misc]
     """A scaled (and more restrictive) version of keras.layers.Dense."""
 
     def __init__(
-        self, units: int, activation: Optional[str] = None, seed: Optional[int] = None
+        self,
+        units: int,
+        activation: Optional[str] = None,
+        scale_for: str = "both",
+        seed: Optional[int] = None,
     ):
         super().__init__(self)
         self.units = units
+        self.scale_for = scale_for
         self.kernel: tf.Variable = None
         self.kernel_initializer = initializers.uniform(seed)
         self.bias: tf.Variable = None
         self.bias_initializer = keras.initializers.zeros()
-        self.activation = activations.get(activation)
+        self.activation = keras.activations.get(activation)
 
     def build(self, input_shape: tf.TensorShape) -> None:
         super().build(input_shape)
@@ -316,7 +353,11 @@ class Dense(keras.layers.Layer):  # type:ignore[misc]
         )
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
-        return self.activation(add_bias(matmul(inputs, self.kernel), self.bias))
+        return self.activation(
+            add_bias(
+                pointwise(inputs, self.kernel, scale_for=self.scale_for), self.bias
+            )
+        )
 
 
 class CausalConv1D(keras.layers.Layer):  # type:ignore[misc]
@@ -344,7 +385,7 @@ class CausalConv1D(keras.layers.Layer):  # type:ignore[misc]
         self.kernel_initializer = initializers.uniform(seed)
         self.bias: tf.Variable = None
         self.bias_initializer = keras.initializers.zeros()
-        self.activation = activations.get(activation)
+        self.activation = keras.activations.get(activation)
 
     def build(self, input_shape: tf.TensorShape) -> None:
         super().build(input_shape)
@@ -364,16 +405,10 @@ class CausalConv1D(keras.layers.Layer):  # type:ignore[misc]
         )
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
-        padded = tf.pad(
-            inputs,
-            [(0, 0), (self.kernel_size - 1, 0), (0, 0)],
+        padded = tf.pad(inputs, [(0, 0), (self.kernel_size - 1, 0), (0, 0)])
+        return self.activation(
+            add_bias(conv1d(padded, self.kernel, padding="VALID"), self.bias)
         )
-        length = inputs.shape[1]
-        # Scaling here to account for zero-padding
-        outputs = scaling(
-            forward=(length / (length + (1 - self.kernel_size) / 2)) ** 0.5
-        )(conv1d(padded, self.kernel, padding="VALID"))
-        return self.activation(add_bias(outputs, self.bias))
 
 
 class Embedding(keras.layers.Layer):  # type:ignore[misc]
@@ -434,26 +469,31 @@ class LayerNormalization(keras.layers.Layer):  # type:ignore[misc]
 
 
 class ResidualLayer(layers.ResidualLayer):
-    """A scaled residual layer."""
+    """A scaled (interpolation) residual layer."""
 
     def __init__(
-        self, body: keras.layers.Layer, norm_type: Optional[str], alpha: Optional[float]
+        self,
+        body: keras.layers.Layer,
+        norm_type: Optional[str],
+        alpha: float,
     ):
         super().__init__(
             body, norm_type=norm_type, alpha=alpha, norm_cls=LayerNormalization
         )
 
     def call(self, x: tf.Tensor) -> tf.Tensor:
-        assert self.alpha is not None, "cannot use plain residual & preserve variance"
-        skip_weight = (1 - self.alpha) ** 0.5
-        residual_weight = self.alpha**0.5
+        assert (
+            self.alpha is not None
+        ), "cannot preserve variance with plain residual (please set 'alpha')"
 
-        branch = scaling(backward=residual_weight)(x)
+        residual_scale = self.alpha**0.5
+        branch = scaling(backward=residual_scale)(x)
         if self.norm_type == "pre":
             branch = self.norm(branch)
 
         branch = self.body(branch)
-        y = skip_weight * x + scaling(forward=residual_weight)(branch)
+
+        y = (1 - self.alpha) ** 0.5 * x + scaling(forward=residual_scale)(branch)
 
         if self.norm_type == "post":
             y = self.norm(y)
@@ -473,4 +513,4 @@ class FFNLayer(layers.FFNLayer):
         self.down.build(input_shape[:-1] + (intermediate_size,))
 
     def call(self, x: tf.Tensor) -> tf.Tensor:
-        return self.down(relu(self.up(x)))  # type:ignore[misc]
+        return self.down(keras.activations.relu(self.up(x)))  # type:ignore[misc]
