@@ -58,7 +58,7 @@ class Settings:
     residual: Optional[Residual]
     sequence: Union[Conv, Attention]
     token: Optional[FFN]
-    unit_scale: bool
+    unit_scale: Optional[str]
     seed: int
 
 
@@ -68,6 +68,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
     def __init__(self, settings: Settings, seeds: Iterator[int]):
         self.settings = settings
         self.seeds = seeds
+        assert settings.unit_scale in {None, "0.2"}
 
     def kernel_initializer(self) -> keras.initializers.Initializer:
         assert not self.settings.unit_scale, "unit scale shouldn't use Glorot"

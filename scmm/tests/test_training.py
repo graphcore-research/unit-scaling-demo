@@ -20,7 +20,7 @@ def test_training(optimiser: training.Optimiser):
                 residual=None,
                 sequence=models.Conv(2, groups=1),
                 token=None,
-                unit_scale=False,
+                unit_scale=None,
                 seed=100,
             )
         )

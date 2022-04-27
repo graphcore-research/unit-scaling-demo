@@ -20,7 +20,7 @@ def _test_settings(path: Path) -> experiments.Settings:
             residual=None,
             sequence=models.Conv(kernel_size=5, groups=1),
             token=None,
-            unit_scale=True,
+            unit_scale="0.2",
             vocab_size=None,  # type:ignore[arg-type]
             seed=None,  # type:ignore[arg-type]
         ),

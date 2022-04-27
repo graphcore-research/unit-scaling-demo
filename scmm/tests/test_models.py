@@ -13,7 +13,7 @@ SETTINGS = models.Settings(
     residual=None,
     sequence=models.Conv(kernel_size=5, groups=1),
     token=None,
-    unit_scale=False,
+    unit_scale=None,
     seed=100,
 )
 
@@ -44,7 +44,7 @@ def cpu_context():
             SETTINGS,
             residual=models.Residual(norm="post", alpha="mean"),
             token=models.FFN(multiple=1.5),
-            unit_scale=True,
+            unit_scale="0.2",
         ),
     ],
 )
