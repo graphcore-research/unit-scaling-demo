@@ -194,6 +194,7 @@ if IPU:
     def _create_ipu_context(settings: IpuSettings) -> Context:
         config = ipu.config.IPUConfig()
         config.auto_select_ipus = 1
+        config.device_connection.type = ipu.config.DeviceConnectionType.ON_DEMAND
         if settings.available_memory_proportion is not None:
             config.matmuls.poplar_options["availableMemoryProportion"] = str(
                 settings.available_memory_proportion
