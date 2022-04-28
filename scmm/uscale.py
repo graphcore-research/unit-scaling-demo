@@ -290,6 +290,7 @@ def softmax_cross_entropy(
 
     returns -- (average_loss, n_items)
     """
+    assert mask.shape == ids.shape, "mask should match target ids"
     logp = tf.nn.log_softmax(scores, axis=-1)
     # Better compilation on IPU vs `tf.gather(logp, ids, batch_dims=2)`
     target_logp = layers.batched_gather(logp, ids)
@@ -463,6 +464,7 @@ class LayerNormalization(keras.layers.Layer):  # type:ignore[misc]
         )
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        assert inputs.dtype != tf.float16, "this implementation is not float16-safe"
         z = inputs - tf.reduce_mean(inputs, axis=-1, keepdims=True)
         normed = z / tf.sqrt(tf.reduce_mean(z**2, axis=-1, keepdims=True))
         return add_bias(multiply_scale(normed, self.gamma), self.beta)
