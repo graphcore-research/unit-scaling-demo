@@ -75,11 +75,7 @@ class Context:
 
     _CURRENT: Optional["Context"] = None
 
-    def __init__(
-        self,
-        strategy: tf.distribute.Strategy,
-        compile: bool,  # pylint:disable=redefined-builtin
-    ):
+    def __init__(self, strategy: tf.distribute.Strategy, compile: bool):
         self.strategy = strategy
         self._scope = self.strategy.scope()
         self._cache = (

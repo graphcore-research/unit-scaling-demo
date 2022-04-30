@@ -63,7 +63,7 @@ PYLINT_TEST_DISABLE = [
 
 
 @cli("-c", "--check", dest="no_format", action="store_true")
-def format(no_format: bool) -> None:  # pylint: disable=redefined-builtin
+def format(no_format: bool) -> None:
     """run autoformatters (e.g. black)"""
     run(["isort", "--check" if no_format else None, *SOURCE])
     run(["black", "--check" if no_format else None, *SOURCE])

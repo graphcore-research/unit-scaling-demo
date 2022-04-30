@@ -18,7 +18,7 @@ def scaling(
     """
 
     @tf.custom_gradient  # type:ignore[misc]
-    def operation(input: tf.Tensor) -> tf.Tensor:  # pylint:disable=redefined-builtin
+    def operation(input: tf.Tensor) -> tf.Tensor:
         def grad(upstream: tf.Tensor) -> tf.Tensor:
             grad_input = upstream
             if backward is not None:
@@ -73,31 +73,60 @@ def pointwise(
 
 
 def conv1d(
-    input: tf.Tensor,  # pylint:disable=redefined-builtin
-    filters: tf.Tensor,
-    padding: str,
+    input: tf.Tensor, filters: tf.Tensor, stride: int = 1, padding: str = "SAME"
 ) -> tf.Tensor:
     """Scaling version of tf.nn.conv1d."""
     # pylint:disable=too-many-locals
-    *batch_shape, input_length, input_size = input.shape
-    filter_width, filter_input_size, output_size = filters.shape
+    batch_size, input_length, channels_in = input.shape
+    filter_width, filter_channels_in, channels_out = filters.shape
 
+    # See https://www.tensorflow.org/api_docs/python/tf/nn#notes_on_padding_2
     output_length = dict(
-        SAME=input_length,
-        VALID=input_length + 1 - filter_width,
+        SAME=np.ceil(input_length / stride),
+        VALID=np.ceil((input_length + 1 - filter_width) / stride),
     )[padding]
-    n_groups = input_size // filter_input_size
-    batch_size = np.prod(batch_shape)
+    n_groups = channels_in // filter_channels_in
 
-    forward_contraction = filter_width * input_size // n_groups
-    backward_contraction = filter_width * output_size // n_groups
+    forward_contraction = filter_width * channels_in // n_groups
+    backward_contraction = filter_width / stride * channels_out // n_groups
     forward_scale = (forward_contraction * backward_contraction) ** -0.25
     backward_scale = (output_length * batch_size) ** -0.5
 
     return tf.nn.conv1d(
         input,
         scaling(forward=forward_scale, backward=backward_scale)(filters),
-        stride=1,
+        stride=stride,
+        padding=padding,
+    )
+
+
+def conv2d(
+    input: tf.Tensor, filters: tf.Tensor, strides: int = 1, padding: str = "SAME"
+) -> tf.Tensor:
+    """Scaling version of tf.nn.conv2d."""
+    # pylint:disable=too-many-locals
+    batch_size, height, width, channels_in = input.shape
+    kernel_height, kernel_width, filter_channels_in, channels_out = filters.shape
+
+    # See https://www.tensorflow.org/api_docs/python/tf/nn#notes_on_padding_2
+    output_area = dict(
+        SAME=np.ceil(height / strides) * np.ceil(width / strides),
+        VALID=np.ceil((height + 1 - kernel_height) / strides)
+        * np.ceil((width + 1 - kernel_width) / strides),
+    )[padding]
+    n_groups = channels_in // filter_channels_in
+
+    forward_contraction = kernel_height * kernel_width * channels_in // n_groups
+    backward_contraction = (
+        (kernel_height / strides) * (kernel_width / strides) * channels_out // n_groups
+    )
+    forward_scale = (forward_contraction * backward_contraction) ** -0.25
+    backward_scale = (output_area * batch_size) ** -0.5
+
+    return tf.nn.conv2d(
+        input,
+        scaling(forward=forward_scale, backward=backward_scale)(filters),
+        strides=strides,
         padding=padding,
     )
 

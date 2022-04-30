@@ -294,7 +294,7 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
         scores = tf.einsum("bnqh,nvh->bnqv", query, embeddings) * self.head_size**-0.5
         return relative_causal_reshape(scores)
 
-    def call(self, input: tf.Tensor) -> tf.Tensor:  # pylint:disable=redefined-builtin
+    def call(self, input: tf.Tensor) -> tf.Tensor:
         # pylint:disable=invalid-name
         q, k, v = tf.unstack(tf.einsum("bsx,xAnh -> Abnsh", input, self.qkv))
         q += self.q_bias[:, tf.newaxis, :]

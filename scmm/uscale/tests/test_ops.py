@@ -1,7 +1,7 @@
-import functools
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import numpy as np
+import pytest
 import tensorflow as tf
 
 from .. import ops
@@ -121,20 +121,40 @@ def test_pointwise():
     assert_unit_scale(out["grad"]["weights"], tol=0.05)
 
 
-def test_conv1d():
-    for padding in ["SAME", "VALID"]:
-        # We're a bit sloppy about padding when using "SAME"
-        out = check_op(
-            ops.conv1d,
-            functools.partial(tf.nn.conv1d, stride=1),
-            seed=400,
-            args=dict(input=(50, 27, 96), filters=(5, 96, 128)),
-            extra_args=dict(padding=padding),
-        )
-        np.testing.assert_allclose(
-            np.std(out["out"]) * np.std(out["grad"]["input"]), 1, atol=0.1
-        )
-        assert_unit_scale(out["grad"]["filters"], tol=0.1)
+@pytest.mark.parametrize(
+    ["padding", "stride"], [("SAME", 1), ("SAME", 2), ("VALID", 1), ("VALID", 2)]
+)
+def test_conv1d(padding, stride):
+    # Note: we're a bit sloppy about padding when using "SAME"
+    out = check_op(
+        ops.conv1d,
+        tf.nn.conv1d,
+        seed=400,
+        args=dict(input=(50, 27, 96), filters=(5, 96, 128)),
+        extra_args=dict(stride=stride, padding=padding),
+    )
+    np.testing.assert_allclose(
+        np.std(out["out"]) * np.std(out["grad"]["input"]), 1, atol=0.1
+    )
+    assert_unit_scale(out["grad"]["filters"], tol=0.1)
+
+
+@pytest.mark.parametrize(
+    ["padding", "stride"], [("SAME", 1), ("SAME", 2), ("VALID", 1), ("VALID", 2)]
+)
+def test_conv2d(padding, stride):
+    # Note: we're a bit sloppy about padding when using "SAME"
+    out = check_op(
+        ops.conv2d,
+        tf.nn.conv2d,
+        seed=500,
+        args=dict(input=(2, 20, 30, 8), filters=(2, 3, 8, 12)),
+        extra_args=dict(strides=stride, padding=padding),
+    )
+    np.testing.assert_allclose(
+        np.std(out["out"]) * np.std(out["grad"]["input"]), 1, atol=0.1
+    )
+    assert_unit_scale(out["grad"]["filters"], tol=0.1)
 
 
 def test_batched_gather():
