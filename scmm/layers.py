@@ -8,7 +8,11 @@ from tensorflow import keras
 
 
 def batched_gather(tables: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:
-    """Simulate tf.gather(tables, indices, batch_dims=indices.ndim)."""
+    """Simulate tf.gather(tables, indices, batch_dims=indices.ndim).
+
+    Better compilation on IPU vs `tf.gather(logp, ids, batch_dims=2)`
+    """
+    # pylint:disable=R0801
     assert len(tables.shape) == len(indices.shape) + 1
     offsets = (
         np.arange(np.prod(indices.shape)).reshape(indices.shape) * tables.shape[-1]

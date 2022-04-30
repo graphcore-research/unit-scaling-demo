@@ -76,7 +76,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
 
     def embed(self) -> keras.layers.Layer:
         if self.settings.unit_scale:
-            return uscale.Embedding(
+            return uscale.layers.Embedding(
                 self.settings.vocab_size,
                 self.settings.hidden_size,
                 seed=next(self.seeds),
@@ -92,7 +92,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
 
     def conv(self, settings: Conv) -> keras.layers.Layer:
         if self.settings.unit_scale:
-            return uscale.CausalConv1D(
+            return uscale.layers.CausalConv1D(
                 self.settings.hidden_size,
                 kernel_size=settings.kernel_size,
                 groups=settings.groups,
@@ -127,7 +127,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
 
     def token_layer(self) -> keras.layers.Layer:
         assert self.settings.token is not None
-        cls = uscale.FFNLayer if self.settings.unit_scale else layers.FFNLayer
+        cls = uscale.layers.FFNLayer if self.settings.unit_scale else layers.FFNLayer
         return cls(
             self.settings.token.multiple, seeds=(next(self.seeds), next(self.seeds))
         )
@@ -146,7 +146,9 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
             assert False, f"unexpected residual.alpha {self.settings.residual.alpha}"
 
         layer_cls = (
-            uscale.ResidualLayer if self.settings.unit_scale else layers.ResidualLayer
+            uscale.layers.ResidualLayer
+            if self.settings.unit_scale
+            else layers.ResidualLayer
         )
         return layer_cls(body, norm_type=self.settings.residual.norm, alpha=alpha)
 
@@ -163,14 +165,14 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
 
     def norm(self) -> keras.layers.Layer:
         return (
-            uscale.LayerNormalization()
+            uscale.layers.LayerNormalization()
             if self.settings.unit_scale
             else keras.layers.LayerNormalization()
         )
 
     def predict(self) -> keras.layers.Layer:
         if self.settings.unit_scale:
-            return uscale.Dense(
+            return uscale.layers.Dense(
                 self.settings.vocab_size, scale_for="backward", seed=next(self.seeds)
             )
         return keras.layers.Dense(
@@ -185,7 +187,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
         self,
     ) -> Callable[[tf.Tensor, tf.Tensor, tf.Tensor], Tuple[tf.Tensor, tf.Tensor]]:
         if self.settings.unit_scale:
-            return uscale.softmax_cross_entropy
+            return uscale.ops.softmax_cross_entropy
         return layers.softmax_cross_entropy
 
 
