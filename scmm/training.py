@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, Optional, Union
 import tensorflow as tf
 from tensorflow import keras
 
-from . import datasets, layers, models
+from . import datasets, layers, models, uscale
 from .pedal import xpu
 
 
@@ -44,6 +44,7 @@ class Settings:
     steps: int
     valid_interval: Optional[int]
     optimiser: Optimiser
+    loss_scale: float
 
 
 def eval_summary(results: Iterable[datasets.Batch]) -> Dict[str, float]:
@@ -57,8 +58,12 @@ def eval_summary(results: Iterable[datasets.Batch]) -> Dict[str, float]:
     return dict(loss=loss / total_tokens, n_tokens=total_tokens)
 
 
-def _get_optimiser(settings: Optimiser) -> keras.optimizers.Optimizer:
+def _get_optimiser(
+    settings: Optimiser, loss_scale: float
+) -> keras.optimizers.Optimizer:
     if isinstance(settings, AdamW):
+        # Note that Adam updates are invariant to fixed gradient scale, so
+        # loss_scale is safely ignored
         return layers.AdamW(
             learning_rate=settings.learning_rate,
             weight_decay=settings.weight_decay,
@@ -66,8 +71,9 @@ def _get_optimiser(settings: Optimiser) -> keras.optimizers.Optimizer:
             beta_2=settings.beta_2,
         )
     if isinstance(settings, SgdM):
-        return keras.optimizers.SGD(
+        return layers.SgdM(
             learning_rate=settings.learning_rate,
+            loss_scale=loss_scale,
             momentum=settings.momentum,
         )
     assert False, f"unknown optimiser {settings}"
@@ -82,7 +88,7 @@ def train(
         settings.batch.loop_seed is not None
     ), "please specify a seed for training batches"
 
-    optimiser = _get_optimiser(settings.optimiser)
+    optimiser = _get_optimiser(settings.optimiser, settings.loss_scale)
 
     def _log(kind: str, step: int, data: Dict[str, Any]) -> Dict[str, Any]:
         return dict(kind=kind, step=step, time=datetime.datetime.now(), **data)
@@ -105,7 +111,8 @@ def train(
     def _training_step(**batch: tf.Tensor) -> Dict[str, tf.Tensor]:
         with tf.GradientTape() as tape:
             result = model.run(**batch)
-        gradients = tape.gradient(result["loss"], model.trainable_variables)
+            loss = uscale.ops.scaling(backward=settings.loss_scale)(result["loss"])
+        gradients = tape.gradient(loss, model.trainable_variables)
         optimiser.apply_gradients(zip(gradients, model.trainable_variables))
         return result
 

@@ -354,7 +354,75 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
 # Optimizers
 
 
-class AdamW(keras.optimizers.Optimizer):  # type:ignore[misc]
+class _Optimizer(keras.optimizers.Optimizer):  # type:ignore[misc]
+    """A small extension of the keras base optimizer."""
+
+    def _add_slot_with_dtype(
+        self, variable: tf.Variable, name: str, dtype: tf.DType
+    ) -> tf.Variable:
+        # pylint:disable=protected-access
+        key = variable._shared_name if variable._in_graph_mode else variable._unique_id
+        result = self._slots.setdefault(key, {}).get(name)
+        if result is None:
+            result = tf.Variable(
+                tf.zeros(variable.shape, dtype=dtype),
+                name=f"{key}/{name}",
+                trainable=False,
+            )
+            self._slots[key][name] = result
+        return result
+
+
+class SgdM(_Optimizer):
+    """SGD with momentum and loss scaling support."""
+
+    def __init__(
+        self,
+        learning_rate: float = 0.01,
+        loss_scale: float = 1,
+        momentum: float = 0,
+        name: str = "SGD",
+    ):
+        super().__init__(name=name)
+        self.learning_rate = learning_rate
+        self.loss_scale = loss_scale
+        self.momentum = momentum
+
+    def _update(self, gradient: tf.Tensor, variable: tf.Variable) -> List[tf.Operation]:
+        if isinstance(gradient, tf.IndexedSlices):
+            # Convert to dense gradient, which is probably fine
+            gradient = tf.math.unsorted_segment_sum(
+                gradient.values, gradient.indices, gradient.shape[0]
+            )
+
+        with tf.name_scope(self._name):
+            momentum_prev = self._add_slot_with_dtype(
+                variable, "momentum", dtype=variable.dtype
+            )
+
+        # This FP32 dance probably isn't of much importance/help here
+        momentum_next = self.momentum * tf.cast(momentum_prev, tf.float32) + tf.cast(
+            gradient, tf.float32
+        )
+        step_size = self.learning_rate / self.loss_scale
+        variable_next = tf.cast(variable, tf.float32) - step_size * momentum_next
+        return [
+            variable.assign(tf.cast(variable_next, variable.dtype)),
+            momentum_prev.assign(tf.cast(momentum_next, momentum_prev.dtype)),
+        ]
+
+    def apply_gradients(
+        self,
+        grads_and_vars: Iterable[Tuple[tf.Tensor, tf.Variable]],
+        name: Optional[str] = None,
+    ) -> tf.Operation:
+        return tf.group(
+            *(self._update(grad, variable) for grad, variable in grads_and_vars),
+            name=name,
+        )
+
+
+class AdamW(_Optimizer):
     """AdamW (https://arxiv.org/abs/1711.05101)."""
 
     def __init__(
@@ -381,33 +449,18 @@ class AdamW(keras.optimizers.Optimizer):  # type:ignore[misc]
                 self._step_variable = self.add_weight("step", (), dtype=tf.int32)
         return self._step_variable
 
-    def _add_slot_with_dtype(
-        self, variable: tf.Variable, name: str, dtype: tf.DType
-    ) -> tf.Variable:
-        # pylint:disable=protected-access
-        key = variable._shared_name if variable._in_graph_mode else variable._unique_id
-        result = self._slots.setdefault(key, {}).get(name)
-        if result is None:
-            result = tf.Variable(
-                tf.zeros(variable.shape, dtype=dtype),
-                name=f"{key}/{name}",
-                trainable=False,
-            )
-            self._slots[key][name] = result
-        return result
-
     def _update(
         self, gradient: tf.Tensor, variable: tf.Variable, scale: tf.Tensor
     ) -> List[tf.Operation]:
-        with tf.name_scope(self._name):
-            m_prev = self._add_slot_with_dtype(variable, "adam_m", dtype=variable.dtype)
-            v_prev = self._add_slot_with_dtype(variable, "adam_v", dtype=tf.float32)
-
         if isinstance(gradient, tf.IndexedSlices):
             # Convert to dense gradient, which is probably fine
             gradient = tf.math.unsorted_segment_sum(
                 gradient.values, gradient.indices, gradient.shape[0]
             )
+
+        with tf.name_scope(self._name):
+            m_prev = self._add_slot_with_dtype(variable, "adam_m", dtype=variable.dtype)
+            v_prev = self._add_slot_with_dtype(variable, "adam_v", dtype=tf.float32)
 
         gradient_fp32 = tf.cast(gradient, tf.float32)
         m_next = (
@@ -442,7 +495,11 @@ class AdamW(keras.optimizers.Optimizer):  # type:ignore[misc]
             * tf.sqrt(1 - self.beta_2 ** tf.cast(step, tf.float32))
             / (1 - self.beta_1 ** tf.cast(step, tf.float32))
         )
-        updates = [step]
-        for grad, variable in grads_and_vars:
-            updates.extend(self._update(grad, variable, scale=scale))
-        return tf.group(*updates, name=name)
+        return tf.group(
+            step,
+            *(
+                self._update(grad, variable, scale=scale)
+                for grad, variable in grads_and_vars
+            ),
+            name=name,
+        )

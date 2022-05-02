@@ -30,6 +30,7 @@ def test_training(optimiser: training.Optimiser):
             steps=10,
             valid_interval=None,
             optimiser=optimiser,
+            loss_scale=1e3,
         )
         log = list(training.train(model, data, context, settings))
         assert 0.5 * np.log(3) < log[0]["loss"]

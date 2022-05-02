@@ -146,27 +146,35 @@ def test_multi_head_attention():
 # Optimizers
 
 
-def test_adamw():
-    random = np.random.Generator(np.random.PCG64(12345))
+def _train_sample_model(optimizer: keras.optimizers.Optimizer) -> List[float]:
+    random = np.random.Generator(np.random.PCG64(983532))
     xs = random.normal(size=(1000, 20))
     ys = xs @ random.normal(size=(20, 10))
+    model = keras.layers.Dense(
+        10, kernel_initializer=keras.initializers.GlorotUniform(seed=87321)
+    )
+    losses = []
+    for _ in range(10):
+        with tf.GradientTape() as tape:
+            loss = keras.losses.mse(ys.flatten(), tf.reshape(model(xs), -1))
+        optimizer.minimize(loss, model.trainable_variables, tape=tape)
+        losses.append(float(loss))
+    return losses
 
-    reference_loss: List[float] = []
-    custom_loss: List[float] = []
-    decay_loss: List[float] = []
-    for optimizer, losses in [
-        (keras.optimizers.Adam(0.1), reference_loss),
-        (layers.AdamW(0.1, weight_decay=0), custom_loss),
-        (layers.AdamW(0.1, weight_decay=0.1), decay_loss),
-    ]:
-        model = keras.layers.Dense(
-            10, kernel_initializer=keras.initializers.GlorotUniform(seed=67890)
-        )
-        for _ in range(10):
-            with tf.GradientTape() as tape:
-                loss = keras.losses.mse(ys.flatten(), tf.reshape(model(xs), -1))
-            optimizer.minimize(loss, model.trainable_variables, tape=tape)
-            losses.append(float(loss))
+
+def test_sgdm():
+    np.testing.assert_allclose(
+        _train_sample_model(layers.SgdM(0.1, momentum=0.9)),
+        _train_sample_model(keras.optimizers.SGD(0.1, momentum=0.9)),
+        atol=1e-4,
+    )
+
+
+def test_adamw():
+    reference_loss = _train_sample_model(keras.optimizers.Adam(0.1))
+    custom_loss = _train_sample_model(layers.AdamW(0.1, weight_decay=0))
+    decay_loss = _train_sample_model(layers.AdamW(0.1, weight_decay=0.1))
+
     np.testing.assert_allclose(custom_loss, reference_loss, atol=1e-4)
     assert (
         1e-3 + reference_loss[-1] < decay_loss[-1]

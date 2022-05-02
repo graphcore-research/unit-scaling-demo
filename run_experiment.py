@@ -33,6 +33,7 @@ settings = S.experiments.Settings(
         steps=int(1e5),
         valid_interval=int(1e4),
         optimiser=S.training.AdamW(learning_rate=2**-6),
+        loss_scale=1,
     ),
     # target=S.pedal.xpu.CpuSettings(),
     target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(1e3)),

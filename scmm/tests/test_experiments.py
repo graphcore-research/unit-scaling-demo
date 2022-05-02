@@ -32,6 +32,7 @@ def _test_settings(path: Path) -> experiments.Settings:
             steps=100,
             valid_interval=50,
             optimiser=training.AdamW(learning_rate=0.05),
+            loss_scale=1,
         ),
         target=xpu.CpuSettings(compile=False),
         output=experiments.OutputSettings(
