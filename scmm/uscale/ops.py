@@ -22,19 +22,20 @@ def scaling(
         def grad(upstream: tf.Tensor) -> tf.Tensor:
             grad_input = upstream
             if backward is not None:
-                if isinstance(upstream, tf.IndexedSlices):
+                if isinstance(grad_input, tf.IndexedSlices):
                     grad_input = tf.IndexedSlices(
-                        values=upstream.values * float(backward),
+                        values=grad_input.values
+                        * tf.cast(backward, grad_input.values.dtype),
                         indices=upstream.indices,
                         dense_shape=upstream.dense_shape,
                     )
                 else:
-                    grad_input = grad_input * float(backward)
+                    grad_input = grad_input * tf.cast(backward, grad_input.dtype)
             return grad_input
 
         output = input
         if forward is not None:
-            output = output * float(forward)
+            output = output * tf.cast(forward, output.dtype)
 
         return output, grad
 
