@@ -63,6 +63,7 @@ class IpuSettings:
 
     iterations_per_loop: int
     available_memory_proportion: Optional[float] = None
+    stochastic_rounding: bool = False
 
     type: str = "ipu"
 
@@ -190,6 +191,11 @@ if IPU:
     def _create_ipu_context(settings: IpuSettings) -> Context:
         config = ipu.config.IPUConfig()
         config.auto_select_ipus = 1
+        config.floating_point_behaviour.esr = (
+            ipu.config.StochasticRoundingBehaviour.from_bool(
+                settings.stochastic_rounding
+            )
+        )
         config.device_connection.type = ipu.config.DeviceConnectionType.ON_DEMAND
         if settings.available_memory_proportion is not None:
             config.matmuls.poplar_options["availableMemoryProportion"] = str(

@@ -15,7 +15,11 @@ if xpu.IPU:
     SETTINGS.extend(
         [
             xpu.IpuSettings(iterations_per_loop=1),
-            xpu.IpuSettings(iterations_per_loop=4, available_memory_proportion=0.2),
+            xpu.IpuSettings(
+                iterations_per_loop=4,
+                available_memory_proportion=0.2,
+                stochastic_rounding=True,
+            ),
         ]
     )
 
