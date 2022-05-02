@@ -100,7 +100,7 @@ def test_layer_residual(
 
 def test_layer_ffn():
     random = np.random.Generator(np.random.PCG64(seed=200))
-    layer = layers.FFNLayer(2, (48723, 7428))
+    layer = layers.FFNLayer(2, seeds=(48723, 7428))
     output = layer(random.normal(size=(5, 6, 7)))
     assert output.shape == (5, 6, 7)
     assert {k: v.shape for k, v in utility.named_weights(layer)} == {

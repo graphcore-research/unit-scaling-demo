@@ -18,6 +18,7 @@ def test_batched_gather():
     )
 
 
+# Also tests layers.LayerNormalization
 @pytest.mark.parametrize(
     ["norm_type", "alpha"], [(None, 0.5), ("pre", None), ("post", 0.1)]
 )
@@ -31,7 +32,7 @@ def test_residual_layer(norm_type: Optional[str], alpha: Optional[float]):
 
 
 def test_ffn_layer():
-    layer = layers.FFNLayer(3, (100, 200))
+    layer = layers.FFNLayer(3, seeds=(100, 200))
     layer.build((7,))
     assert layer.up.kernel.shape == (7, 21)  # type:ignore[union-attr]
     assert layer.down.kernel.shape == (21, 7)  # type:ignore[union-attr]

@@ -21,7 +21,8 @@ settings = S.experiments.Settings(
         residual=S.models.Residual(norm="pre", alpha="mean"),
         sequence=S.models.Conv(kernel_size=7, groups=8),
         token=S.models.FFN(multiple=4),
-        unit_scale=True,
+        unit_scale="0.2",
+        dtype="float32",
         vocab_size=None,  # type:ignore[arg-type]
         seed=None,  # type:ignore[arg-type]
     ),
@@ -29,14 +30,16 @@ settings = S.experiments.Settings(
         batch=S.datasets.BatchSettings(
             sequences=8, sequence_length=256, overlap_length=32, loop_seed=None
         ),
-        steps=int(1e6),
+        steps=int(1e5),
         valid_interval=int(1e4),
         optimiser=S.training.AdamW(learning_rate=2**-6),
     ),
     # target=S.pedal.xpu.CpuSettings(),
     target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(1e3)),
     output=S.experiments.OutputSettings(
-        wandb=True, log=out and out / "log.jsonl", checkpoint=out and out / "model.npz"
+        wandb=True,
+        log=out and out / "log.jsonl",
+        checkpoint=out and out / "model.npz",
     ),
     metadata=dict(experiment="dev"),
     seed=None,  # type:ignore[arg-type]

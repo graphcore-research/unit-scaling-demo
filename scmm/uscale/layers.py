@@ -32,9 +32,10 @@ class Dense(keras.layers.Layer):  # type:ignore[misc]
         units: int,
         activation: Optional[str] = None,
         scale_for: str = "both",
+        dtype: tf.DType = tf.float32,
         seed: Optional[int] = None,
     ):
-        super().__init__(self)
+        super().__init__(dtype=dtype)
         self.units = units
         self.scale_for = scale_for
         self.kernel: tf.Variable = None
@@ -75,9 +76,10 @@ class CausalConv1D(keras.layers.Layer):  # type:ignore[misc]
         kernel_size: int,
         groups: Optional[int] = None,
         activation: Optional[str] = None,
+        dtype: tf.DType = tf.float32,
         seed: Optional[int] = None,
     ):
-        super().__init__()
+        super().__init__(dtype=dtype)
         self.filters = filters
         self.kernel_size = kernel_size
         self.groups = groups or 1
@@ -119,9 +121,13 @@ class Embedding(keras.layers.Layer):  # type:ignore[misc]
     """A scaled variant of keras.layers.Embedding."""
 
     def __init__(
-        self, table_size: int, embeddings_size: int, seed: Optional[int] = None
+        self,
+        table_size: int,
+        embeddings_size: int,
+        dtype: tf.DType = tf.float32,
+        seed: Optional[int] = None,
     ):
-        super().__init__(self)
+        super().__init__(dtype=dtype)
         self.table_size = table_size
         self.embeddings_size = embeddings_size
         self.embeddings: tf.Variable = None
@@ -148,31 +154,19 @@ class Embedding(keras.layers.Layer):  # type:ignore[misc]
         )
 
 
-class LayerNormalization(keras.layers.Layer):  # type:ignore[misc]
+class LayerNormalization(layers.LayerNormalization):
     """A scaled variant of keras.layers.LayerNormalization."""
 
-    def __init__(self, epsilon: float = 0.001):
-        super().__init__()
-        self.epsilon = epsilon
-        self.beta: tf.Variable = None
+    def __init__(self, epsilon: float = 0.001, dtype: tf.DType = tf.float32):
+        super().__init__(epsilon=epsilon, dtype=dtype)
+        # Overwritten from base
         self.beta_initializer = keras.initializers.zeros()
-        self.gamma: tf.Variable = None
         self.gamma_initializer = keras.initializers.ones()
 
-    def build(self, input_shape: tf.TensorShape) -> None:
-        super().build(input_shape)
-        self.beta = self.add_weight(
-            "beta", shape=input_shape[-1], initializer=self.beta_initializer
-        )
-        self.gamma = self.add_weight(
-            "gamma", shape=input_shape[-1], initializer=self.gamma_initializer
-        )
-
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
-        assert inputs.dtype != tf.float16, "this implementation is not float16-safe"
-        z = inputs - tf.reduce_mean(inputs, axis=-1, keepdims=True)
-        normed = z / tf.sqrt(tf.reduce_mean(z**2, axis=-1, keepdims=True))
-        return ops.add_bias(ops.multiply_scale(normed, self.gamma), self.beta)
+        return ops.add_bias(
+            ops.multiply_scale(self._normalize(inputs), self.gamma), self.beta
+        )
 
 
 class ResidualLayer(layers.ResidualLayer):
@@ -183,9 +177,14 @@ class ResidualLayer(layers.ResidualLayer):
         body: keras.layers.Layer,
         norm_type: Optional[str],
         alpha: float,
+        dtype: tf.DType = tf.float32,
     ):
         super().__init__(
-            body, norm_type=norm_type, alpha=alpha, norm_cls=LayerNormalization
+            body,
+            norm_type=norm_type,
+            alpha=alpha,
+            dtype=dtype,
+            norm_cls=LayerNormalization,
         )
 
     def call(self, x: tf.Tensor) -> tf.Tensor:
@@ -214,9 +213,9 @@ class FFNLayer(layers.FFNLayer):
         super().build(input_shape)
         hidden_size = input_shape[-1]
         intermediate_size = int(self.multiple * hidden_size)
-        self.up = Dense(intermediate_size, seed=self.seeds[0])
+        self.up = Dense(intermediate_size, dtype=self.dtype, seed=self.seeds[0])
         self.up.build(input_shape[:-1] + (hidden_size,))
-        self.down = Dense(hidden_size, seed=self.seeds[1])
+        self.down = Dense(hidden_size, dtype=self.dtype, seed=self.seeds[1])
         self.down.build(input_shape[:-1] + (intermediate_size,))
 
     def call(self, x: tf.Tensor) -> tf.Tensor:

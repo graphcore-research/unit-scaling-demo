@@ -24,17 +24,17 @@ def scaling(
             if backward is not None:
                 if isinstance(upstream, tf.IndexedSlices):
                     grad_input = tf.IndexedSlices(
-                        values=upstream.values * backward,
+                        values=upstream.values * float(backward),
                         indices=upstream.indices,
                         dense_shape=upstream.dense_shape,
                     )
                 else:
-                    grad_input = grad_input * backward
+                    grad_input = grad_input * float(backward)
             return grad_input
 
         output = input
         if forward is not None:
-            output = output * forward
+            output = output * float(forward)
 
         return output, grad
 
@@ -150,6 +150,7 @@ def batched_gather(tables: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:
 
     Better compilation on IPU vs `tf.gather(logp, ids, batch_dims=2)`
     """
+    # Implemented here and in scmm.layers to avoid circular dependency issues
     assert len(tables.shape) == len(indices.shape) + 1
     offsets = (
         np.arange(np.prod(indices.shape)).reshape(indices.shape) * tables.shape[-1]
@@ -166,11 +167,11 @@ def softmax_cross_entropy(
     Note that we abandon unit scaling in the forward pass, since this is
     designed as a final loss term.
 
-    returns -- (average_loss, n_items)
+    returns -- (average_loss, n_items) -- average_loss always in fp32
     """
     assert mask.shape == ids.shape, "mask should match target ids"
-    logp = tf.nn.log_softmax(scores, axis=-1)
-    # Better compilation on IPU vs `tf.gather(logp, ids, batch_dims=2)`
+    # Use float32 for local computation - keeping things simple
+    logp = tf.nn.log_softmax(tf.cast(scores, tf.float32), axis=-1)
     target_logp = batched_gather(logp, ids)
     total_loss = tf.reduce_sum(tf.cast(mask, target_logp.dtype) * -target_logp)
     n_ids = tf.reduce_sum(tf.cast(mask, tf.int32))

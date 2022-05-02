@@ -21,6 +21,7 @@ def test_training(optimiser: training.Optimiser):
                 sequence=models.Conv(2, groups=1),
                 token=None,
                 unit_scale=None,
+                dtype="float32",
                 seed=100,
             )
         )

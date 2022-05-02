@@ -21,6 +21,7 @@ def _test_settings(path: Path) -> experiments.Settings:
             sequence=models.Conv(kernel_size=5, groups=1),
             token=None,
             unit_scale="0.2",
+            dtype="float32",
             vocab_size=None,  # type:ignore[arg-type]
             seed=None,  # type:ignore[arg-type]
         ),

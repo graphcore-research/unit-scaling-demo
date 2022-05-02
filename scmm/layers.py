@@ -12,6 +12,7 @@ def batched_gather(tables: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:
 
     Better compilation on IPU vs `tf.gather(logp, ids, batch_dims=2)`
     """
+    # Implemented here and in uscale.ops to avoid circular dependency issues
     # pylint:disable=R0801
     assert len(tables.shape) == len(indices.shape) + 1
     offsets = (
@@ -26,14 +27,47 @@ def softmax_cross_entropy(
 ) -> Tuple[tf.Tensor, tf.Tensor]:
     """Compute masked softmax cross entropy loss.
 
-    returns -- (average_loss, n_items)
+    returns -- (average_loss, n_items) -- average_loss always in fp32
     """
-    logp = tf.nn.log_softmax(scores)
-    # Better compilation on IPU vs `tf.gather(logp, ids, batch_dims=2)`
+    assert mask.shape == ids.shape, "mask should match target ids"
+    # Use float32 for local computation - keeping things simple
+    logp = tf.nn.log_softmax(tf.cast(scores, tf.float32))
     target_logp = batched_gather(logp, ids)
     total_loss = tf.reduce_sum(tf.cast(mask, target_logp.dtype) * -target_logp)
     n_ids = tf.reduce_sum(tf.cast(mask, tf.int32))
-    return total_loss / tf.cast(n_ids, total_loss.dtype), n_ids
+    loss = total_loss / tf.cast(n_ids, total_loss.dtype)
+    return loss, n_ids
+
+
+class LayerNormalization(keras.layers.Layer):  # type:ignore[misc]
+    """A FP16-safe variant of keras.layers.LayerNormalization."""
+
+    def __init__(self, epsilon: float = 0.001, dtype: tf.DType = tf.float32):
+        super().__init__(dtype=dtype)
+        self.epsilon = epsilon
+        self.beta: tf.Variable = None
+        self.beta_initializer = keras.initializers.zeros()
+        self.gamma: tf.Variable = None
+        self.gamma_initializer = keras.initializers.ones()
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        self.beta = self.add_weight(
+            "beta", shape=input_shape[-1], initializer=self.beta_initializer
+        )
+        self.gamma = self.add_weight(
+            "gamma", shape=input_shape[-1], initializer=self.gamma_initializer
+        )
+
+    @staticmethod
+    def _normalize(inputs: tf.Tensor) -> tf.Tensor:
+        inputs_fp32 = tf.cast(inputs, tf.float32)
+        z = inputs_fp32 - tf.reduce_mean(inputs_fp32, axis=-1, keepdims=True)
+        normed = z / tf.sqrt(tf.reduce_mean(z**2, axis=-1, keepdims=True))
+        return tf.cast(normed, inputs.dtype)
+
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        return self.gamma * self._normalize(inputs) + self.beta
 
 
 class ResidualLayer(keras.layers.Layer):  # type:ignore[misc]
@@ -53,9 +87,10 @@ class ResidualLayer(keras.layers.Layer):  # type:ignore[misc]
         body: keras.layers.Layer,
         norm_type: Optional[str],
         alpha: Optional[float],
-        norm_cls: Type[keras.layers.Layer] = keras.layers.LayerNormalization,
+        dtype: tf.DType = tf.float32,
+        norm_cls: Type[keras.layers.Layer] = LayerNormalization,
     ):
-        super().__init__()
+        super().__init__(dtype=dtype)
         self.body = body
         self.norm_type = norm_type
         self.alpha_value = alpha
@@ -68,7 +103,7 @@ class ResidualLayer(keras.layers.Layer):  # type:ignore[misc]
         super().build(input_shape)
         self.body.build(input_shape)
         if self.norm_type is not None:
-            self.norm = self.norm_cls()
+            self.norm = self.norm_cls(dtype=self.dtype)
             self.norm.build(input_shape)
         if self.alpha_value is not None:
             # Turn alpha into a non-trainable variable, for sake of outlining
@@ -99,8 +134,13 @@ class ResidualLayer(keras.layers.Layer):  # type:ignore[misc]
 class FFNLayer(keras.layers.Layer):  # type:ignore[misc]
     """A pointwise expansion FFN layer (a la Transformer, https://arxiv.org/abs/1706.03762)."""
 
-    def __init__(self, multiple: float, seeds: Optional[Tuple[int, int]] = None):
-        super().__init__()
+    def __init__(
+        self,
+        multiple: float,
+        dtype: tf.DType = tf.float32,
+        seeds: Optional[Tuple[int, int]] = None,
+    ):
+        super().__init__(dtype=dtype)
         self.multiple = multiple
         self.seeds = seeds or (None, None)
         self.up: Optional[keras.layers.Layer] = None  # pylint:disable=invalid-name
@@ -112,11 +152,13 @@ class FFNLayer(keras.layers.Layer):  # type:ignore[misc]
         intermediate_size = int(self.multiple * hidden_size)
         self.up = keras.layers.Dense(
             intermediate_size,
+            dtype=self.dtype,
             kernel_initializer=keras.initializers.GlorotUniform(seed=self.seeds[0]),
         )
         self.up.build(input_shape[:-1] + (hidden_size,))
         self.down = keras.layers.Dense(
             hidden_size,
+            dtype=self.dtype,
             kernel_initializer=keras.initializers.GlorotUniform(seed=self.seeds[1]),
         )
         self.down.build(input_shape[:-1] + (intermediate_size,))
@@ -128,8 +170,8 @@ class FFNLayer(keras.layers.Layer):  # type:ignore[misc]
 class PadAndShiftLayer(keras.layers.Layer):  # type:ignore[misc]
     """Shifts sequence features one place to the right with a trainable padding vector."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, dtype: tf.DType = tf.float32) -> None:
+        super().__init__(dtype=dtype)
         self.padding: tf.Variable = None
 
     def build(self, input_shape: tf.TensorShape) -> None:
@@ -152,8 +194,8 @@ class PadAndShiftLayer(keras.layers.Layer):  # type:ignore[misc]
 class Isotropic(keras.layers.Layer):  # type:ignore[misc]
     """Like keras.models.Sequential, but isotropic & with friendly names for each layer."""
 
-    def __init__(self, **layers: keras.layers.Layer):
-        super().__init__()
+    def __init__(self, dtype: tf.DType = tf.float32, **layers: keras.layers.Layer):
+        super().__init__(dtype=dtype)
         self._layers = layers
         for name, layer in layers.items():
             setattr(self, name, layer)
@@ -233,14 +275,15 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
         head_size: int,
         frequencies: int,
         max_period: int,
-        seeds: Tuple[int, int, int],
+        dtype: tf.DType = tf.float32,
+        seeds: Optional[Tuple[int, int, int]] = None,
     ):
-        super().__init__()
+        super().__init__(dtype=dtype)
         self.heads = heads
         self.head_size = head_size
         self.frequencies = frequencies
         self.max_period = max_period
-        self.seeds = seeds
+        self.seeds = (None, None, None) if seeds is None else seeds
         self.qkv: tf.Variable = None
         self.q_bias: tf.Variable = None
         self.positional: tf.Variable = None
@@ -272,6 +315,7 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
         )
         self.out = keras.layers.Dense(
             input_size,
+            dtype=self.dtype,
             kernel_initializer=keras.initializers.GlorotUniform(seed=self.seeds[2]),
         )
         self.out.build(input_shape[:-1] + (self.heads * self.head_size,))
@@ -337,13 +381,27 @@ class AdamW(keras.optimizers.Optimizer):  # type:ignore[misc]
                 self._step_variable = self.add_weight("step", (), dtype=tf.int32)
         return self._step_variable
 
+    def _add_slot_with_dtype(
+        self, variable: tf.Variable, name: str, dtype: tf.DType
+    ) -> tf.Variable:
+        # pylint:disable=protected-access
+        key = variable._shared_name if variable._in_graph_mode else variable._unique_id
+        result = self._slots.setdefault(key, {}).get(name)
+        if result is None:
+            result = tf.Variable(
+                tf.zeros(variable.shape, dtype=dtype),
+                name=f"{key}/{name}",
+                trainable=False,
+            )
+            self._slots[key][name] = result
+        return result
+
     def _update(
         self, gradient: tf.Tensor, variable: tf.Variable, scale: tf.Tensor
     ) -> List[tf.Operation]:
-        assert variable.dtype == tf.float32, "float16 AdamW not implemented"
         with tf.name_scope(self._name):
-            m_prev = self.add_slot(variable, "adam_m")
-            v_prev = self.add_slot(variable, "adam_v")
+            m_prev = self._add_slot_with_dtype(variable, "adam_m", dtype=variable.dtype)
+            v_prev = self._add_slot_with_dtype(variable, "adam_v", dtype=tf.float32)
 
         if isinstance(gradient, tf.IndexedSlices):
             # Convert to dense gradient, which is probably fine
@@ -351,14 +409,26 @@ class AdamW(keras.optimizers.Optimizer):  # type:ignore[misc]
                 gradient.values, gradient.indices, gradient.shape[0]
             )
 
-        m_next = m_prev.assign(self.beta_1 * m_prev + (1 - self.beta_1) * gradient)
-        v_next = v_prev.assign(self.beta_2 * v_prev + (1 - self.beta_2) * gradient**2)
-        variable_update = variable.assign(
-            variable
-            - self.learning_rate * self.weight_decay * variable
+        gradient_fp32 = tf.cast(gradient, tf.float32)
+        m_next = (
+            self.beta_1 * tf.cast(m_prev, tf.float32)
+            + (1 - self.beta_1) * gradient_fp32
+        )
+        v_next = (
+            self.beta_2 * tf.cast(v_prev, tf.float32)
+            + (1 - self.beta_2) * gradient_fp32**2
+        )
+        variable_fp32 = tf.cast(variable, tf.float32)
+        variable_next = (
+            variable_fp32
+            - self.learning_rate * self.weight_decay * variable_fp32
             - scale * m_next / (tf.sqrt(v_next) + self.epsilon)
         )
-        return [m_next, v_next, variable_update]
+        return [
+            variable.assign(tf.cast(variable_next, variable.dtype)),
+            m_prev.assign(tf.cast(m_next, m_prev.dtype)),
+            v_prev.assign(tf.cast(v_next, v_prev.dtype)),
+        ]
 
     def apply_gradients(
         self,

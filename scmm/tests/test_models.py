@@ -14,6 +14,7 @@ SETTINGS = models.Settings(
     sequence=models.Conv(kernel_size=5, groups=1),
     token=None,
     unit_scale=None,
+    dtype="float32",
     seed=100,
 )
 
@@ -39,12 +40,14 @@ def cpu_context():
                 heads=2, head_size=4, frequencies=16, max_period=16
             ),
             token=models.FFN(multiple=1.5),
+            dtype="float16",
         ),
         dataclasses.replace(
             SETTINGS,
             residual=models.Residual(norm="post", alpha="mean"),
             token=models.FFN(multiple=1.5),
             unit_scale="0.2",
+            dtype="float16",
         ),
     ],
 )

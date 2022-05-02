@@ -59,6 +59,7 @@ class Settings:
     sequence: Union[Conv, Attention]
     token: Optional[FFN]
     unit_scale: Optional[str]
+    dtype: str
     seed: int
 
 
@@ -67,6 +68,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
 
     def __init__(self, settings: Settings, seeds: Iterator[int]):
         self.settings = settings
+        self.dtype = tf.as_dtype(settings.dtype)
         self.seeds = seeds
         assert settings.unit_scale in {None, "0.2"}
 
@@ -79,12 +81,14 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
             return uscale.layers.Embedding(
                 self.settings.vocab_size,
                 self.settings.hidden_size,
+                dtype=self.dtype,
                 seed=next(self.seeds),
             )
         # Unit variance embeddings make sense in any case
         return keras.layers.Embedding(
             self.settings.vocab_size,
             self.settings.hidden_size,
+            dtype=self.dtype,
             embeddings_initializer=keras.initializers.RandomUniform(
                 -np.sqrt(3), np.sqrt(3), seed=next(self.seeds)
             ),
@@ -97,6 +101,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
                 kernel_size=settings.kernel_size,
                 groups=settings.groups,
                 activation="relu",
+                dtype=self.dtype,
                 seed=next(self.seeds),
             )
         return keras.layers.Conv1D(
@@ -105,6 +110,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
             groups=settings.groups,
             activation="relu",
             padding="causal",
+            dtype=self.dtype,
             kernel_initializer=self.kernel_initializer(),
         )
 
@@ -115,6 +121,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
             head_size=settings.head_size,
             frequencies=settings.frequencies,
             max_period=settings.max_period,
+            dtype=self.dtype,
             seeds=(next(self.seeds), next(self.seeds), next(self.seeds)),
         )
 
@@ -129,7 +136,9 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
         assert self.settings.token is not None
         cls = uscale.layers.FFNLayer if self.settings.unit_scale else layers.FFNLayer
         return cls(
-            self.settings.token.multiple, seeds=(next(self.seeds), next(self.seeds))
+            self.settings.token.multiple,
+            dtype=self.dtype,
+            seeds=(next(self.seeds), next(self.seeds)),
         )
 
     def residual(self, body: keras.layers.Layer, index: int) -> keras.layers.Layer:
@@ -150,14 +159,16 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
             if self.settings.unit_scale
             else layers.ResidualLayer
         )
-        return layer_cls(body, norm_type=self.settings.residual.norm, alpha=alpha)
+        return layer_cls(
+            body, norm_type=self.settings.residual.norm, alpha=alpha, dtype=self.dtype
+        )
 
     def trunk_layer(self, index: Iterator[int]) -> keras.layers.Layer:
         # Relying heavily on dict ordering...
         parts = dict(sequence=self.residual(self.sequence_layer(), next(index)))
         if self.settings.token:
             parts["token"] = self.residual(self.token_layer(), next(index))
-        return layers.Isotropic(**parts)
+        return layers.Isotropic(dtype=self.dtype, **parts)
 
     def trunk(self) -> List[keras.layers.Layer]:
         index = iter(it.count())
@@ -165,23 +176,27 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
 
     def norm(self) -> keras.layers.Layer:
         return (
-            uscale.layers.LayerNormalization()
+            uscale.layers.LayerNormalization(dtype=self.dtype)
             if self.settings.unit_scale
-            else keras.layers.LayerNormalization()
+            else layers.LayerNormalization(dtype=self.dtype)
         )
 
     def predict(self) -> keras.layers.Layer:
         if self.settings.unit_scale:
             return uscale.layers.Dense(
-                self.settings.vocab_size, scale_for="backward", seed=next(self.seeds)
+                self.settings.vocab_size,
+                scale_for="backward",
+                dtype=self.dtype,
+                seed=next(self.seeds),
             )
         return keras.layers.Dense(
-            self.settings.vocab_size, kernel_initializer=self.kernel_initializer()
+            self.settings.vocab_size,
+            dtype=self.dtype,
+            kernel_initializer=self.kernel_initializer(),
         )
 
-    @staticmethod
-    def predict_padding() -> keras.layers.Layer:
-        return layers.PadAndShiftLayer()
+    def predict_padding(self) -> keras.layers.Layer:
+        return layers.PadAndShiftLayer(dtype=self.dtype)
 
     def loss(
         self,
