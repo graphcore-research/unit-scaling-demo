@@ -65,6 +65,8 @@ def log_checkpoint(path: Path, model: models.Model) -> utility.Logger:
 
 def log_stderr(item: Dict[str, Any]) -> None:
     """Log to terminal."""
+    if item["kind"] == "train_step":
+        return
     print(
         str(item) + " " * 20,
         file=sys.stderr,

@@ -225,8 +225,8 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
 
         # Our base model is always pre-built
         self.build((None, None))
-        for _, layer in utility.named_layers(self):
-            assert layer.built
+        for name, layer in utility.named_layers(self):
+            assert layer.built, f"layer {name} ({layer}) was not built"
 
         for layer in self.trunk:
             xpu.current_context().outline(layer)
