@@ -99,13 +99,23 @@ def test_layer_residual(
 
 
 def test_layer_ffn():
-    random = np.random.Generator(np.random.PCG64(seed=200))
     layer = layers.FFNLayer(2, seeds=(48723, 7428))
-    output = layer(random.normal(size=(5, 6, 7)))
-    assert output.shape == (5, 6, 7)
+    out = output_and_gradients(layer, (5, 6, 7), seed=200)
+    assert out["outputs"].shape == (5, 6, 7)
     assert {k: v.shape for k, v in utility.named_weights(layer)} == {
         "up.kernel": (7, 14),
         "up.bias": (14,),
         "down.kernel": (14, 7),
         "down.bias": (7,),
     }
+
+
+def test_layer_multi_head_attention():
+    layer = layers.MultiHeadAttention(
+        heads=5, head_size=16, frequencies=50, max_period=90, seeds=(50, 60, 70)
+    )
+    out = output_and_gradients(layer, (29, 90, 64), seed=300)
+    assert out["outputs"].shape == (29, 90, 64)
+    for key, _ in utility.named_weights(layer):
+        # Nowhere near unit scale, but we'll just check a broad range
+        assert 0.1 < np.std(out[f"grad_{key}"]) < 10

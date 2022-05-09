@@ -1,6 +1,6 @@
 """Keras layers replacements with unit scaling."""
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
@@ -220,3 +220,98 @@ class FFNLayer(layers.FFNLayer):
 
     def call(self, x: tf.Tensor) -> tf.Tensor:
         return self.down(keras.activations.relu(self.up(x)))  # type:ignore[misc]
+
+
+class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
+    """Scaled multi-head self attention a la Transformer.
+
+    With causal masking.
+
+    With relative-positional embeddings a la Transformer XL.
+    """
+
+    # pylint:disable=too-many-instance-attributes
+    # pylint:disable=R0801
+
+    def __init__(
+        self,
+        heads: int,
+        head_size: int,
+        frequencies: int,
+        max_period: int,
+        dtype: tf.DType = tf.float32,
+        seeds: Optional[Tuple[int, int, int]] = None,
+    ):
+        super().__init__(dtype=dtype)
+        self.heads = heads
+        self.head_size = head_size
+        self.frequencies = frequencies
+        self.max_period = max_period
+        self.seeds = (None, None, None) if seeds is None else seeds
+        self.qkv: tf.Variable = None
+        self.q_bias: tf.Variable = None
+        self.positional: tf.Variable = None
+        self.out: keras.layers.Layer = None
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        input_size = input_shape[-1]
+        self.qkv = self.add_weight(
+            name="qkv",
+            shape=(input_size, 3, self.heads, self.head_size),
+            initializer=initializers.uniform(self.seeds[0]),
+        )
+        self.q_bias = self.add_weight(
+            name="q_bias",
+            shape=(self.heads, self.head_size),
+            initializer=keras.initializers.zeros(),
+        )
+        self.positional = self.add_weight(
+            name="positional",
+            shape=(self.frequencies, self.heads, self.head_size),
+            initializer=initializers.uniform(self.seeds[1]),
+        )
+        self.out = Dense(input_size, dtype=self.dtype, seed=self.seeds[2])
+        self.out.build(input_shape[:-1] + (self.heads * self.head_size,))
+
+    def _positional_weights(self, query: tf.Tensor) -> tf.Tensor:
+        sequence_length = query.shape[-2]
+        sins = tf.constant(
+            np.sqrt(2)
+            * layers.sinusoid_embedding(
+                sequence_length, self.frequencies, self.max_period
+            ),
+            dtype=query.dtype,
+        )
+        embeddings = tf.einsum(
+            "sf,fnh->nsh",
+            sins,
+            ops.scaling(
+                forward=self.frequencies**-0.5, backward=sequence_length**-0.5
+            )(self.positional),
+        )
+        scores = tf.einsum("bnqh,nvh->bnqv", query, embeddings) * self.head_size**-0.5
+        return layers.relative_causal_reshape(scores)
+
+    def call(self, input: tf.Tensor) -> tf.Tensor:
+        # pylint:disable=invalid-name
+        batch_size, sequence_length, input_size = input.shape
+        q, k, v = tf.unstack(
+            tf.einsum(
+                "bsx,xAnh -> Abnsh",
+                input,
+                ops.scaling(
+                    forward=(input_size * self.head_size * self.heads) ** -0.25,
+                    backward=(batch_size * sequence_length) ** -0.5,
+                )(self.qkv),
+            )
+        )
+        q += ops.scaling(backward=(batch_size * sequence_length) ** -0.5)(
+            self.q_bias[:, tf.newaxis, :]
+        )
+        a = tf.einsum("bnqh,bnkh->bnqk", q, k) * self.head_size**-0.5
+        a += self._positional_weights(q)
+        a = layers.causal_mask(a)
+        a = tf.nn.softmax(a, axis=-1)
+        o = tf.einsum("bnqk,bnkh->bqnh", a, v)
+        return self.out(tf.reshape(o, o.shape[:-2] + (self.head_size * self.heads,)))

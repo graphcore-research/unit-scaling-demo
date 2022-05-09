@@ -259,6 +259,15 @@ def relative_causal_reshape(scores: tf.Tensor) -> tf.Tensor:
     return tmp
 
 
+def causal_mask(attention: tf.Tensor, mask_value: float = -1000) -> tf.Tensor:
+    """Apply a causal mask to an attention matrix of shape (*, L, L)."""
+    sequence_length = attention.shape[-1]
+    return attention + tf.constant(
+        np.triu(np.full((sequence_length, sequence_length), mask_value), k=1),
+        dtype=attention.dtype,
+    )
+
+
 class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
     """Multi-head self attention a la Transformer.
 
@@ -320,15 +329,7 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
         )
         self.out.build(input_shape[:-1] + (self.heads * self.head_size,))
 
-    @staticmethod
-    def _causal_mask(attention: tf.Tensor) -> tf.Tensor:
-        sequence_length = attention.shape[-1]
-        return tf.constant(
-            np.triu(np.full((sequence_length, sequence_length), -1000), k=1),
-            dtype=attention.dtype,
-        )
-
-    def _positional_mask(self, query: tf.Tensor) -> tf.Tensor:
+    def _positional_weights(self, query: tf.Tensor) -> tf.Tensor:
         sequence_length = query.shape[-2]
         sins = tf.constant(
             sinusoid_embedding(sequence_length, self.frequencies, self.max_period),
@@ -343,8 +344,8 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
         q, k, v = tf.unstack(tf.einsum("bsx,xAnh -> Abnsh", input, self.qkv))
         q += self.q_bias[:, tf.newaxis, :]
         a = tf.einsum("bnqh,bnkh->bnqk", q, k) * self.head_size**-0.5
-        a += self._positional_mask(q)
-        a += self._causal_mask(a)
+        a += self._positional_weights(q)
+        a = causal_mask(a)
         a = tf.nn.softmax(a, axis=-1)
         o = tf.einsum("bnqk,bnkh->bqnh", a, v)
         return self.out(tf.reshape(o, o.shape[:-2] + (self.head_size * self.heads,)))
