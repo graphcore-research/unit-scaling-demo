@@ -25,36 +25,44 @@ def cpu_context():
         yield context
 
 
+MODEL_SETTINGS = [
+    SETTINGS,
+    dataclasses.replace(
+        SETTINGS,
+        residual=models.Residual(norm=None, alpha=None),
+        token=models.FFN(multiple=1.5),
+    ),
+    dataclasses.replace(
+        SETTINGS,
+        residual=models.Residual(norm="pre", alpha="mean"),
+        sequence=models.Attention(heads=2, head_size=4, frequencies=16, max_period=16),
+    ),
+    dataclasses.replace(
+        SETTINGS,
+        residual=models.Residual(norm="post", alpha=0.5),
+        sequence=models.RNN(rebias=1),
+    ),
+]
+
+
 @pytest.mark.parametrize(
     "settings",
     [
-        SETTINGS,
-        dataclasses.replace(
-            SETTINGS,
-            residual=models.Residual(norm=None, alpha=0.2),
-        ),
-        # Variants
-        dataclasses.replace(
-            SETTINGS,
-            residual=models.Residual(norm="pre", alpha=None),
-            sequence=models.Attention(
-                heads=2, head_size=4, frequencies=16, max_period=16
-            ),
-            token=models.FFN(multiple=1.5),
-            dtype="float16",
-        ),
-        dataclasses.replace(SETTINGS, sequence=models.RNN(rebias=1)),
-        # Unit scaling
-        dataclasses.replace(
-            SETTINGS,
-            residual=models.Residual(norm="post", alpha="mean"),
-            token=models.FFN(multiple=1.5),
-            unit_scale="0.2",
-            dtype="float16",
-        ),
+        dataclasses.replace(settings, dtype=dtype, unit_scale=unit_scale)
+        for settings in MODEL_SETTINGS
+        for dtype in ["float32", "float16"]
+        for unit_scale in [None, "0.2"]
     ],
+    ids=repr,
 )
 def test_model(cpu_context: xpu.Context, settings: models.Settings):
+    if (
+        settings.unit_scale
+        and settings.residual is not None
+        and settings.residual.alpha is None
+    ):
+        pytest.skip("unsupported combination")
+
     batch_sequences = 3
     sequence_length = 12
     random = np.random.Generator(np.random.PCG64(200))

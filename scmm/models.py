@@ -123,8 +123,12 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
         )
 
     def attention(self, settings: Attention) -> keras.layers.Layer:
-        assert not self.settings.unit_scale, "not implemented"
-        return layers.MultiHeadAttention(
+        cls = (
+            uscale.layers.MultiHeadAttention
+            if self.settings.unit_scale
+            else layers.MultiHeadAttention
+        )
+        return cls(
             heads=settings.heads,
             head_size=settings.head_size,
             frequencies=settings.frequencies,
@@ -134,11 +138,16 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
         )
 
     def rnn(self, settings: RNN) -> keras.layers.Layer:
-        assert not self.settings.unit_scale, "not implemented"
-        return layers.RNN(
-            layers.RecurrentHighwayCell(
+        (cls, cell_cls) = (
+            (uscale.layers.RNN, uscale.layers.RecurrentHighwayCell)
+            if self.settings.unit_scale
+            else (layers.RNN, layers.RecurrentHighwayCell)
+        )
+        return cls(
+            cell_cls(
                 hidden_size=self.settings.hidden_size,
                 rebias=settings.rebias,
+                dtype=self.dtype,
                 seed=next(self.seeds),
             )
         )

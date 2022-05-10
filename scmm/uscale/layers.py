@@ -315,3 +315,73 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
         a = tf.nn.softmax(a, axis=-1)
         o = tf.einsum("bnqk,bnkh->bqnh", a, v)
         return self.out(tf.reshape(o, o.shape[:-2] + (self.head_size * self.heads,)))
+
+
+class RecurrentHighwayCell(keras.layers.Layer):  # type:ignore[misc]
+    """Scaled recurrent highway cell from https://arxiv.org/abs/1607.03474."""
+
+    # pylint:disable=R0801
+
+    def __init__(
+        self,
+        hidden_size: int,
+        rebias: float,
+        dtype: tf.DType = tf.float32,
+        seed: Optional[int] = None,
+    ):
+        super().__init__(name=type(self).__name__, dtype=dtype)
+        self.hidden_size = hidden_size
+        self.carry_rebias = rebias
+        self.update_rebias = -rebias
+        self.seed = seed
+        self.gates: tf.Variable = None
+        self.gates_bias: tf.Variable = None
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        self.gates = self.add_weight(
+            "gates",
+            shape=(2, input_shape[-1] + self.hidden_size, self.hidden_size),
+            initializer=initializers.uniform(seed=self.seed),
+        )
+        self.gates_bias = self.add_weight(
+            "gates_bias",
+            shape=(2, self.hidden_size),
+            initializer=keras.initializers.zeros(),
+        )
+
+    def call(
+        self, input: tf.Tensor, hidden: tf.Tensor, sequence_length: int
+    ) -> tf.Tensor:
+        batch_size = input.shape[0] * sequence_length
+        gates_scale = ((input.shape[1] + self.hidden_size) * self.hidden_size) ** -0.25
+        gate_outputs = tf.concat([input, hidden], axis=1) @ ops.scaling(
+            forward=gates_scale, backward=batch_size**-0.5
+        )(self.gates)
+        gate_outputs += ops.scaling(backward=batch_size**-0.5)(
+            self.gates_bias[:, tf.newaxis]
+        )
+        transform, update = tf.unstack(gate_outputs)
+        update = tf.sigmoid(update + self.update_rebias)
+        return (1 - update) * hidden + update * tf.tanh(transform)
+
+
+class RNN(layers.RNN):
+    """A scaled, basic unidirectional RNN."""
+
+    def call(self, input: tf.Tensor) -> tf.Tensor:
+        batch_size, sequence_length, _ = input.shape
+        # Note: sbh = (sequence, batch, hidden)
+        input_sbh = tf.transpose(input, (1, 0, 2))
+        initial_hidden = tf.tile(
+            ops.scaling(backward=batch_size**-0.5)(self.initial_hidden[tf.newaxis]),
+            (batch_size, 1),
+        )
+        output_sbh = tf.scan(
+            lambda hidden, input: self.cell(
+                input, hidden, sequence_length=sequence_length
+            ),
+            input_sbh,
+            initializer=initial_hidden,
+        )
+        return tf.transpose(output_sbh, (1, 0, 2))

@@ -358,8 +358,14 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
 class RecurrentHighwayCell(keras.layers.Layer):  # type:ignore[misc]
     """A recurrent highway cell from https://arxiv.org/abs/1607.03474."""
 
-    def __init__(self, hidden_size: int, rebias: float, seed: Optional[int] = None):
-        super().__init__(name=type(self).__name__)
+    def __init__(
+        self,
+        hidden_size: int,
+        rebias: float,
+        dtype: tf.DType = tf.float32,
+        seed: Optional[int] = None,
+    ):
+        super().__init__(name=type(self).__name__, dtype=dtype)
         self.hidden_size = hidden_size
         self.carry_rebias = rebias
         self.update_rebias = -rebias
@@ -404,7 +410,7 @@ class RNN(keras.layers.Layer):  # type:ignore[misc]
     """
 
     def __init__(self, cell: keras.layers.Layer):
-        super().__init__(name=type(self).__name__)
+        super().__init__(name=type(self).__name__, dtype=cell.dtype)
         self.cell = cell
         self.initial_hidden: tf.Variable = None
 
@@ -418,6 +424,7 @@ class RNN(keras.layers.Layer):  # type:ignore[misc]
         )
 
     def call(self, input: tf.Tensor) -> tf.Tensor:
+        # Note: sbh = (sequence, batch, hidden)
         input_sbh = tf.transpose(input, (1, 0, 2))
         output_sbh = tf.scan(
             lambda hidden, input: self.cell(input, hidden),

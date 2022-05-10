@@ -106,3 +106,14 @@ def test_layer_multi_head_attention():
     for key, _ in utility.named_weights(layer):
         # Nowhere near unit scale, but we'll just check a broad range
         assert 0.1 < np.std(out[f"grad_{key}"]) < 10
+
+
+def test_rnn():  # also tests RecurrentHighwayCell
+    layer = layers.RNN(
+        layers.RecurrentHighwayCell(hidden_size=128, rebias=1, seed=3893)
+    )
+    out = testing.output_and_gradients(layer, (29, 90, 64), seed=1398)
+    assert out["outputs"].shape == (29, 90, 128)
+    for key, _ in utility.named_weights(layer):
+        # Nowhere near unit scale, but we'll just check a broad range
+        assert 0.1 < np.std(out[f"grad_{key}"]) < 10
