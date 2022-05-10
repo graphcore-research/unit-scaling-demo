@@ -358,12 +358,12 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
 class RecurrentHighwayCell(keras.layers.Layer):  # type:ignore[misc]
     """A recurrent highway cell from https://arxiv.org/abs/1607.03474."""
 
-    def __init__(self, hidden_size: int, rebias: float, tied_gates: bool):
+    def __init__(self, hidden_size: int, rebias: float, seed: Optional[int] = None):
         super().__init__(name=type(self).__name__)
         self.hidden_size = hidden_size
         self.carry_rebias = rebias
         self.update_rebias = -rebias
-        self.tied_gates = tied_gates
+        self.seed = seed
         self.gates: tf.Variable = None
         self.gates_bias: tf.Variable = None
 
@@ -371,32 +371,26 @@ class RecurrentHighwayCell(keras.layers.Layer):  # type:ignore[misc]
         super().build(input_shape)
         input_size = input_shape[-1]
         scale = (3 / (input_size + self.hidden_size)) ** 0.5
-        n_gates = 2 + (not self.tied_gates)
         self.gates = self.add_weight(
             "gates",
-            shape=(n_gates, input_size + self.hidden_size, self.hidden_size),
-            initializer=keras.initializers.random_uniform(-scale, scale),
+            shape=(2, input_size + self.hidden_size, self.hidden_size),
+            initializer=keras.initializers.random_uniform(
+                -scale, scale, seed=self.seed
+            ),
         )
         self.gates_bias = self.add_weight(
             "gates_bias",
-            shape=(n_gates, self.hidden_size),
+            shape=(2, self.hidden_size),
             initializer=keras.initializers.zeros(),
         )
 
     def call(self, input: tf.Tensor, hidden: tf.Tensor) -> tf.Tensor:
-        gates = (
+        transform, update = tf.unstack(
             tf.concat([input, hidden], axis=1) @ self.gates
             + self.gates_bias[:, tf.newaxis]
         )
-        if self.tied_gates:
-            transform, update = tf.unstack(gates)
-            update = tf.sigmoid(update + self.update_rebias)
-            return (1 - update) * hidden + update * tf.tanh(transform)
-
-        transform, update, carry = tf.unstack(gates)
-        carry = tf.sigmoid(carry + self.carry_rebias)
         update = tf.sigmoid(update + self.update_rebias)
-        return carry * hidden + update * tf.tanh(transform)
+        return (1 - update) * hidden + update * tf.tanh(transform)
 
 
 class RNN(keras.layers.Layer):  # type:ignore[misc]
@@ -404,6 +398,9 @@ class RNN(keras.layers.Layer):  # type:ignore[misc]
 
     Expects inputs of shape (batch, sequence, feature), and produces outputs of shape
     (batch, sequence, hidden).
+
+    Note that this implementation has patholological memory usage on IPU, due to missing
+    recomputation.
     """
 
     def __init__(self, cell: keras.layers.Layer):

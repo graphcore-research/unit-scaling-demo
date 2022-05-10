@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
+from ...tests import testing
 from .. import ops
 
 
@@ -34,10 +35,6 @@ def assert_scaled_allclose(
     np.testing.assert_allclose(
         actual / np.std(actual), desired / np.std(desired), atol=atol, err_msg=err_msg
     )
-
-
-def assert_unit_scale(value: np.ndarray, tol: float, err_msg: str = "") -> None:
-    np.testing.assert_allclose(np.std(value), 1, atol=tol, err_msg=err_msg)
 
 
 def check_op(
@@ -93,7 +90,7 @@ def test_add_bias():
         seed=842,
         args=dict(features=(1000,), bias=np.zeros(1000, dtype=np.float32)),
     )
-    assert_unit_scale(out["grad"]["bias"], tol=0.05)
+    testing.assert_unit_scale(out["grad"]["bias"], tol=0.05)
 
 
 def test_multiply_scale():
@@ -103,7 +100,7 @@ def test_multiply_scale():
         seed=2345,
         args=dict(features=(1000,), scale=np.ones(1000, dtype=np.float32)),
     )
-    assert_unit_scale(out["grad"]["scale"], tol=0.05)
+    testing.assert_unit_scale(out["grad"]["scale"], tol=0.05)
 
 
 def test_pointwise():
@@ -118,7 +115,7 @@ def test_pointwise():
     np.testing.assert_allclose(
         np.std(out["out"]) * np.std(out["grad"]["inputs"]), 1, atol=0.05
     )
-    assert_unit_scale(out["grad"]["weights"], tol=0.05)
+    testing.assert_unit_scale(out["grad"]["weights"], tol=0.05)
 
 
 @pytest.mark.parametrize(
@@ -136,7 +133,7 @@ def test_conv1d(padding, stride):
     np.testing.assert_allclose(
         np.std(out["out"]) * np.std(out["grad"]["input"]), 1, atol=0.1
     )
-    assert_unit_scale(out["grad"]["filters"], tol=0.1)
+    testing.assert_unit_scale(out["grad"]["filters"], tol=0.1)
 
 
 @pytest.mark.parametrize(
@@ -154,7 +151,7 @@ def test_conv2d(padding, stride):
     np.testing.assert_allclose(
         np.std(out["out"]) * np.std(out["grad"]["input"]), 1, atol=0.1
     )
-    assert_unit_scale(out["grad"]["filters"], tol=0.1)
+    testing.assert_unit_scale(out["grad"]["filters"], tol=0.1)
 
 
 def test_batched_gather():
@@ -177,4 +174,4 @@ def test_softmax_cross_entropy():
     assert int(n_ids) == batch_size * sequence_length
     assert 0 < float(loss) < 2 * np.log(n_classes)
     grad_scores = tape.gradient(loss, scores)
-    assert_unit_scale(grad_scores, 0.1)
+    testing.assert_unit_scale(grad_scores, 0.1)

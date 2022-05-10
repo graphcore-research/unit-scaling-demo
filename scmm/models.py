@@ -44,9 +44,7 @@ class Attention:
 class RNN:
     """Recurrence (sequence mixing) settings."""
 
-    cell: str
-    tied_gates: bool = True
-    rebias: float = 0
+    rebias: float
     kind: str = "rnn"
 
 
@@ -137,17 +135,13 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
 
     def rnn(self, settings: RNN) -> keras.layers.Layer:
         assert not self.settings.unit_scale, "not implemented"
-        if settings.cell == "lstm":
-            return keras.layers.LSTM(self.settings.hidden_size, return_sequences=True)
-        if settings.cell == "rhn":
-            return layers.RNN(
-                layers.RecurrentHighwayCell(
-                    hidden_size=self.settings.hidden_size,
-                    rebias=settings.rebias,
-                    tied_gates=settings.tied_gates,
-                )
+        return layers.RNN(
+            layers.RecurrentHighwayCell(
+                hidden_size=self.settings.hidden_size,
+                rebias=settings.rebias,
+                seed=next(self.seeds),
             )
-        assert False, f"unexpected recurrent cell {settings.cell}"
+        )
 
     def sequence_layer(self) -> keras.layers.Layer:
         if isinstance(self.settings.sequence, Conv):
