@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorflow import keras
 
 from .. import layers
-from ..pedal import utility
+from . import testing
 
 
 def test_batched_gather():
@@ -126,7 +126,7 @@ def test_multi_head_attention():
     # Hard to check too much here - just make sure it's broadly sensible
     assert result.shape == inputs.shape
     np.testing.assert_array_less(np.std(result, axis=-1), 10)
-    assert {name: tuple(w.shape) for name, w in utility.named_weights(layer)} == {
+    assert testing.weight_shapes(layer) == {
         "qkv": (8, 3, 5, 4),
         "q_bias": (5, 4),
         "positional": (13, 5, 4),
@@ -140,6 +140,29 @@ def test_multi_head_attention():
     mask = np.tril(np.ones((11, 7)), k=0)[..., np.newaxis]
     np.testing.assert_allclose(perturbed * mask, result * mask)
     assert not np.allclose(perturbed, result)
+
+
+####################
+# RNN
+
+
+def test_recurrent_highway_cell():
+    random = np.random.Generator(np.random.PCG64(387232))
+    layer = layers.RecurrentHighwayCell(
+        hidden_size=16, rebias=1, seed=random.integers(10000)
+    )
+    layer.build((3, 8))
+    assert testing.weight_shapes(layer) == dict(gates=(2, 24, 16), gates_bias=(2, 16))
+
+    output = layer(random.random(size=(3, 8)), random.random(size=(3, 16)))
+    assert output.shape == (3, 16)
+    assert np.std(output) < 10
+
+
+def test_rnn():
+    layer = layers.RNN(layers.RecurrentHighwayCell(hidden_size=20, rebias=0, seed=439))
+    out = testing.output_and_gradients(layer, (3, 5, 8), seed=1341)
+    assert out["outputs"].shape == (3, 5, 20)
 
 
 ####################

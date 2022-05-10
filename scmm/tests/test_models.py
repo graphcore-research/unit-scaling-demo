@@ -33,6 +33,7 @@ def cpu_context():
             SETTINGS,
             residual=models.Residual(norm=None, alpha=0.2),
         ),
+        # Variants
         dataclasses.replace(
             SETTINGS,
             residual=models.Residual(norm="pre", alpha=None),
@@ -42,6 +43,8 @@ def cpu_context():
             token=models.FFN(multiple=1.5),
             dtype="float16",
         ),
+        dataclasses.replace(SETTINGS, sequence=models.RNN(rebias=1)),
+        # Unit scaling
         dataclasses.replace(
             SETTINGS,
             residual=models.Residual(norm="post", alpha="mean"),

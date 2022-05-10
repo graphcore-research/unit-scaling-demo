@@ -352,6 +352,82 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
 
 
 ####################
+# RNN
+
+
+class RecurrentHighwayCell(keras.layers.Layer):  # type:ignore[misc]
+    """A recurrent highway cell from https://arxiv.org/abs/1607.03474."""
+
+    def __init__(self, hidden_size: int, rebias: float, seed: Optional[int] = None):
+        super().__init__(name=type(self).__name__)
+        self.hidden_size = hidden_size
+        self.carry_rebias = rebias
+        self.update_rebias = -rebias
+        self.seed = seed
+        self.gates: tf.Variable = None
+        self.gates_bias: tf.Variable = None
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        input_size = input_shape[-1]
+        scale = (3 / (input_size + self.hidden_size)) ** 0.5
+        self.gates = self.add_weight(
+            "gates",
+            shape=(2, input_size + self.hidden_size, self.hidden_size),
+            initializer=keras.initializers.random_uniform(
+                -scale, scale, seed=self.seed
+            ),
+        )
+        self.gates_bias = self.add_weight(
+            "gates_bias",
+            shape=(2, self.hidden_size),
+            initializer=keras.initializers.zeros(),
+        )
+
+    def call(self, input: tf.Tensor, hidden: tf.Tensor) -> tf.Tensor:
+        transform, update = tf.unstack(
+            tf.concat([input, hidden], axis=1) @ self.gates
+            + self.gates_bias[:, tf.newaxis]
+        )
+        update = tf.sigmoid(update + self.update_rebias)
+        return (1 - update) * hidden + update * tf.tanh(transform)
+
+
+class RNN(keras.layers.Layer):  # type:ignore[misc]
+    """A basic, unidirectional RNN.
+
+    Expects inputs of shape (batch, sequence, feature), and produces outputs of shape
+    (batch, sequence, hidden).
+
+    Note that this implementation has patholological memory usage on IPU, due to missing
+    recomputation.
+    """
+
+    def __init__(self, cell: keras.layers.Layer):
+        super().__init__(name=type(self).__name__)
+        self.cell = cell
+        self.initial_hidden: tf.Variable = None
+
+    def build(self, input_shape: tf.TensorShape) -> None:
+        super().build(input_shape)
+        self.cell.build(tf.TensorShape([input_shape[0], input_shape[2]]))
+        self.initial_hidden = self.add_weight(
+            "initial_hidden",
+            shape=(self.cell.hidden_size,),
+            initializer=keras.initializers.zeros(),
+        )
+
+    def call(self, input: tf.Tensor) -> tf.Tensor:
+        input_sbh = tf.transpose(input, (1, 0, 2))
+        output_sbh = tf.scan(
+            lambda hidden, input: self.cell(input, hidden),
+            input_sbh,
+            initializer=tf.tile(self.initial_hidden[tf.newaxis], (input.shape[0], 1)),
+        )
+        return tf.transpose(output_sbh, (1, 0, 2))
+
+
+####################
 # Optimizers
 
 

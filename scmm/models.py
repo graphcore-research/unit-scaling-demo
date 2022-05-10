@@ -41,6 +41,14 @@ class Attention:
 
 
 @dataclass
+class RNN:
+    """Recurrence (sequence mixing) settings."""
+
+    rebias: float
+    kind: str = "rnn"
+
+
+@dataclass
 class FFN:
     """FFN (token mixing) settings."""
 
@@ -125,11 +133,23 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
             seeds=(next(self.seeds), next(self.seeds), next(self.seeds)),
         )
 
+    def rnn(self, settings: RNN) -> keras.layers.Layer:
+        assert not self.settings.unit_scale, "not implemented"
+        return layers.RNN(
+            layers.RecurrentHighwayCell(
+                hidden_size=self.settings.hidden_size,
+                rebias=settings.rebias,
+                seed=next(self.seeds),
+            )
+        )
+
     def sequence_layer(self) -> keras.layers.Layer:
         if isinstance(self.settings.sequence, Conv):
             return self.conv(self.settings.sequence)
         if isinstance(self.settings.sequence, Attention):
             return self.attention(self.settings.sequence)
+        if isinstance(self.settings.sequence, RNN):
+            return self.rnn(self.settings.sequence)
         assert False, f"unexpected sequence settings {self.settings.sequence}"
 
     def token_layer(self) -> keras.layers.Layer:
