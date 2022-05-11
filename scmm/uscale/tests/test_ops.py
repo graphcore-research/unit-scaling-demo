@@ -127,7 +127,6 @@ def test_pointwise(scale_for):
     if scale_for == "both":
         np.testing.assert_allclose(std_out * std_grad_inputs, 1, atol=0.05)
     if scale_for == "both_min":
-        print(std_out, std_grad_inputs)
         assert std_out < 1.05 and std_grad_inputs < 1.05
     if scale_for == "both_arithmetic":
         assert (std_out < 1) != (std_grad_inputs < 1), "signs should be swapped"
