@@ -1,3 +1,4 @@
+import functools
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import numpy as np
@@ -103,19 +104,33 @@ def test_multiply_scale():
     testing.assert_unit_scale(out["grad"]["scale"], tol=0.05)
 
 
-def test_pointwise():
+@pytest.mark.parametrize(
+    "scale_for",
+    ["forward", "backward", "both", "both_arithmetic", "both_min", "separate"],
+)
+def test_pointwise(scale_for):
     out = check_op(
-        ops.pointwise,
+        functools.partial(ops.pointwise, scale_for=scale_for),
         lambda inputs, weights: tf.matmul(  # pylint:disable=unnecessary-lambda
             inputs, weights
         ),
         seed=300,
-        args=dict(inputs=(3, 99, 150), weights=(150, 110)),
-    )
-    np.testing.assert_allclose(
-        np.std(out["out"]) * np.std(out["grad"]["inputs"]), 1, atol=0.05
+        args=dict(inputs=(3, 99, 200), weights=(200, 110)),
     )
     testing.assert_unit_scale(out["grad"]["weights"], tol=0.05)
+    std_out = np.std(out["out"])
+    std_grad_inputs = np.std(out["grad"]["inputs"])
+    if scale_for in {"forward", "separate"}:
+        np.testing.assert_allclose(std_out, 1, atol=0.05)
+    if scale_for in {"backward", "separate"}:
+        np.testing.assert_allclose(std_grad_inputs, 1, atol=0.05)
+    if scale_for == "both":
+        np.testing.assert_allclose(std_out * std_grad_inputs, 1, atol=0.05)
+    if scale_for == "both_min":
+        print(std_out, std_grad_inputs)
+        assert std_out < 1.05 and std_grad_inputs < 1.05
+    if scale_for == "both_arithmetic":
+        assert (std_out < 1) != (std_grad_inputs < 1), "signs should be swapped"
 
 
 @pytest.mark.parametrize(

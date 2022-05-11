@@ -51,26 +51,41 @@ def pointwise(
 
     weights -- will receive scaled gradients
 
-    scale_for -- "forward" | "backward" | "both" -- how should the forward/backward-inputs
-                 pass scale be chosen?
+    scale_for -- how should the forward/backward-inputs pass scale be chosen?
 
                 "forward" -- preserve variance in the forward pass
                 "backward" -- preserve variance in the backward pass
                 "both" -- trade off forward and backward pass variance
+                "both_arithmetic" -- ditto, using arithmetic mean
+                "both_min" - ditto, using the minimum scale between forward and backward
+                "separate" -- separate scaling factors in the forward and backward-inputs passes
+                              WARNING - when using skip connections, this may cause inconsistent
+                              gradients.
     """
     assert len(weights.shape) == 2, "pointwise requires 2D rhs `weights`"
 
     input_size, output_size = weights.shape
+    backward_weights_scale = np.prod(inputs.shape[:-1]) ** -0.5
+
+    if scale_for == "separate":
+        return scaling(forward=input_size**-0.5)(
+            scaling(backward=output_size**-0.5)(inputs)
+            @ scaling(backward=backward_weights_scale)(weights)
+        )
+
     # Note "both" is different from Glorot's sqrt(2 / (input_size + output_size)), as this
     # should preserves scale better after boom_down(boom_up(x))
     forward_scale = dict(
         forward=input_size**-0.5,
         backward=output_size**-0.5,
         both=(input_size * output_size) ** -0.25,
+        both_arithmetic=((input_size + output_size) / 2) ** -0.5,
+        both_min=max(input_size, output_size) ** -0.5,
     )[scale_for]
-    backward_scale = np.prod(inputs.shape[:-1]) ** -0.5
 
-    return inputs @ scaling(forward=forward_scale, backward=backward_scale)(weights)
+    return inputs @ scaling(forward=forward_scale, backward=backward_weights_scale)(
+        weights
+    )
 
 
 def conv1d(

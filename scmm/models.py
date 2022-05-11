@@ -214,7 +214,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
         if self.settings.unit_scale:
             return uscale.layers.Dense(
                 self.settings.vocab_size,
-                scale_for="backward",
+                scale_for="both_min",
                 dtype=self.dtype,
                 seed=next(self.seeds),
             )
@@ -269,7 +269,8 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
             layer.build(hidden_shape)
         self.norm.build(hidden_shape)
         self.predict.build(hidden_shape)
-        self.predict_padding.build(tuple(input_shape) + (self.settings.vocab_size,))
+        prediction_shape = tuple(input_shape) + (self.settings.vocab_size,)
+        self.predict_padding.build(prediction_shape)
 
     def run(self, tokens: tf.Tensor, mask: tf.Tensor) -> Dict[str, tf.Tensor]:
         """Run the language model for cross entropy loss."""
