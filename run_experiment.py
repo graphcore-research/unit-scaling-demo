@@ -89,7 +89,6 @@ if __name__ == "__main__":
             f" --executable_cache_path=/a/scratch/{os.environ['USER']}_research/tmp/cache"
         )
 
-    # target = S.experiments.run
     if sweep:
         sweep_settings = S.experiments.LrSweep(settings, step=4, threshold=0.05)
         S.experiments.find_learning_rate(settings=sweep_settings)
