@@ -240,6 +240,8 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
 class Model(keras.layers.Layer):  # type:ignore[misc]
     """Base language model."""
 
+    # pylint:disable=too-many-instance-attributes
+
     def __init__(self, settings: Settings):
         super().__init__()
         self.settings = settings
@@ -248,6 +250,7 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
             settings, iter(utility.split_seed(settings.seed, 1000))  # plenty of seeds
         )
         self.embed = factory.embed()
+        self.embed_norm = factory.norm()
         self.trunk = factory.trunk()
         self.norm = factory.norm()
         self.predict = factory.predict()
@@ -267,6 +270,7 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
 
         self.embed.build(input_shape)
         hidden_shape = tuple(input_shape) + (self.settings.hidden_size,)
+        self.embed_norm.build(hidden_shape)
         for layer in self.trunk:
             layer.build(hidden_shape)
         self.norm.build(hidden_shape)
@@ -277,7 +281,7 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
     def run(self, tokens: tf.Tensor, mask: tf.Tensor) -> Dict[str, tf.Tensor]:
         """Run the language model for cross entropy loss."""
 
-        hiddens = self.embed(tokens)
+        hiddens = self.embed_norm(self.embed(tokens))
         for layer in self.trunk:
             hiddens = layer(hiddens)
         scores = self.predict_padding(self.predict(self.norm(hiddens)))
