@@ -1,5 +1,6 @@
 """Top-line training logic."""
 
+import collections
 import dataclasses
 import datetime
 import itertools as it
@@ -48,14 +49,22 @@ class Settings:
 
 
 def eval_summary(results: Iterable[datasets.Batch]) -> Dict[str, float]:
-    """Summarise evaluation results."""
+    """Summarise evaluation results, weighted averages according to "n_tokens"."""
 
-    total_tokens, loss = 0, 0.0
+    total_tokens = 0
+    stats: Dict[str, float] = collections.defaultdict(float)
     for result in results:
         n_tokens = int(result["n_tokens"])
         total_tokens += n_tokens
-        loss += float(result["loss"]) * n_tokens
-    return dict(loss=loss / total_tokens, n_tokens=total_tokens)
+        for key, value in result.items():
+            if key != "n_tokens":
+                stats[key] += value * n_tokens
+
+    # Normalisation
+    for key in stats:
+        stats[key] /= total_tokens
+    stats["n_tokens"] = total_tokens
+    return stats
 
 
 def _get_optimiser(

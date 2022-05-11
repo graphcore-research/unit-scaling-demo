@@ -230,9 +230,11 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
     def loss(
         self,
     ) -> Callable[[tf.Tensor, tf.Tensor, tf.Tensor], Tuple[tf.Tensor, tf.Tensor]]:
-        if self.settings.unit_scale:
-            return uscale.ops.softmax_cross_entropy
-        return layers.softmax_cross_entropy
+        return (
+            uscale.ops.softmax_cross_entropy
+            if self.settings.unit_scale
+            else layers.softmax_cross_entropy
+        )
 
 
 class Model(keras.layers.Layer):  # type:ignore[misc]
@@ -280,7 +282,11 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
             hiddens = layer(hiddens)
         scores = self.predict_padding(self.predict(self.norm(hiddens)))
         loss, n_tokens = self.loss(scores, tokens, mask)
-        return dict(loss=loss, n_tokens=n_tokens)
+        return dict(
+            loss=loss,
+            n_tokens=n_tokens,
+            act_hiddens_final=tf.math.reduce_std(hiddens),
+        )
 
     def weight_stats(self) -> Dict[str, Any]:
         """Stats regarding weights in the model."""
