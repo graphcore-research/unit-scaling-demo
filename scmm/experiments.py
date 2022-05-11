@@ -29,6 +29,7 @@ def log_wandb() -> Generator[utility.Logger, None, None]:
                 config=utility.remove_keys(item, "kind"),
                 dir="out",
                 project="scaled-matmuls",
+                reinit=True,
             )
         elif item["kind"] == "stats":
             wandb.run.summary.update(  # type:ignore[union-attr]
@@ -183,18 +184,27 @@ class LrSweep:
     threshold: float
 
 
-def find_learning_rate(settings: LrSweep) -> Tuple[Settings, float]:
+def find_learning_rate(
+    settings: LrSweep, run_in_subprocess: bool = True
+) -> Tuple[Settings, float]:
     """Perform a LR sweep, starting from `base`.
 
     Tries: initial, initial * step, initial * step^2, ...
 
     Until the validation loss is more than `best_loss + threshold`.
+
+    Run in subprocess (by default) for sake of isolation & memory use.
     """
     best_loss, best_settings = None, None
     for n in it.count():
         test_settings = copy.deepcopy(settings.base)
         test_settings.training.optimiser.learning_rate *= settings.step**n
-        loss = run(test_settings)["valid_loss"]
+        # Run in subprocess for sake of isolation & memory use
+        loss = (
+            utility.run_in_subprocess(run, settings=test_settings)
+            if run_in_subprocess
+            else run(settings=test_settings)
+        )["valid_loss"]
         print(
             f"LR {test_settings.training.optimiser.learning_rate} -> {loss}",
             file=sys.stderr,

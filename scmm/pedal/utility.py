@@ -2,6 +2,7 @@
 
 import contextlib
 import datetime
+import multiprocessing
 from pathlib import Path
 from typing import (
     Any,
@@ -118,3 +119,28 @@ def named_weights(
         for attr, child in vars(sublayer).items():
             if not attr.startswith("_") and isinstance(child, tf.Variable):
                 yield (f"{name}.{attr}" if name else attr, child)
+
+
+def _runner(
+    queue: multiprocessing.Queue,  # type:ignore[type-arg]
+    command: Callable[..., T],
+    args: Dict[str, Any],
+) -> None:
+    queue.put_nowait(command(**args))
+
+
+def run_in_subprocess(command: Callable[..., T], **args: Any) -> T:
+    """Run a command synchronously in a (non-daemon) subprocess."""
+    # We'd prefer to use a simple multiprocessing.Pool here, but I can't find a
+    # way to make the workers non-daemonic
+    queue = multiprocessing.Manager().Queue()
+    process = multiprocessing.get_context("spawn").Process(
+        target=_runner, args=(queue, command, args)
+    )
+    process.start()
+    process.join()
+    if process.exitcode:
+        raise multiprocessing.ProcessError(
+            f"Process exited with code {process.exitcode}"
+        )
+    return queue.get()  # type:ignore[no-any-return]

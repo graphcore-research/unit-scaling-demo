@@ -1,7 +1,9 @@
 import contextlib
 import datetime
 import json
+import multiprocessing
 from pathlib import Path
+from typing import Dict
 
 import numpy as np
 import pytest
@@ -85,3 +87,15 @@ def test_named_layers_and_weights():
         "final_bias": (7,),
     }
     assert dict(utility.named_weights(model, recursive=False)).keys() == {"final_bias"}
+
+
+def _stub(x: int) -> Dict[str, int]:
+    if x % 2 == 0:
+        raise ValueError("x is even")
+    return dict(y=5 * x)
+
+
+def test_run_in_subprocess():
+    assert utility.run_in_subprocess(_stub, x=3) == dict(y=15)
+    with pytest.raises(multiprocessing.ProcessError):
+        utility.run_in_subprocess(_stub, x=4)

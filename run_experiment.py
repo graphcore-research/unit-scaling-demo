@@ -2,18 +2,20 @@
 
 import dataclasses
 import json
-import multiprocessing
 import os
 from pathlib import Path
 
 import scmm as S
 
+# pylint:disable=invalid-name
+
 # ssub -t mk2 -n 1 -- python run_experiment.py
 if __name__ == "__main__":
 
-    out, profile = None, None
+    out, profile, sweep = None, None, False
     # profile = Path("out/profiles/dev")
     # out = Path("out/training/dev")
+    # sweep = True
 
     settings = S.experiments.Settings(
         # data=S.experiments.DataSettings(Path("scmm/tests/data"), kind="test"),
@@ -40,11 +42,10 @@ if __name__ == "__main__":
             optimiser=S.training.AdamW(learning_rate=2**-6),
             loss_scale=1,
         ),
-        # target=S.pedal.xpu.CpuSettings(),
         target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(1e3)),
         output=S.experiments.OutputSettings(
-            wandb=False,
             stderr=False,
+            wandb=True,
             log=out and out / "log.jsonl",
             checkpoint=out and out / "model.npz",
         ),
@@ -79,17 +80,19 @@ if __name__ == "__main__":
             ),
             target=dataclasses.replace(settings.target, iterations_per_loop=int(2)),
             output=S.experiments.OutputSettings(
-                wandb=False, log=profile / "log.jsonl", checkpoint=None
+                stderr=True, wandb=False, log=profile / "log.jsonl", checkpoint=None
             ),
         )
     else:
-        os.environ[
-            "TF_POPLAR_FLAGS"
-        ] = f"--executable_cache_path=/a/scratch/{os.environ['USER']}_research/tmp/cache"
+        os.environ["TF_POPLAR_FLAGS"] = (
+            "--show_progress_bar=false"
+            f" --executable_cache_path=/a/scratch/{os.environ['USER']}_research/tmp/cache"
+        )
 
-    # Run in subprocess, just so that the PVTI options "take"
-    process = multiprocessing.get_context("spawn").Process(
-        target=S.experiments.run, args=(settings,)
-    )
-    process.start()
-    process.join()
+    # target = S.experiments.run
+    if sweep:
+        sweep_settings = S.experiments.LrSweep(settings, step=4, threshold=0.05)
+        S.experiments.find_learning_rate(settings=sweep_settings)
+    else:
+        # Run in subprocess so that the PVTI options "take"
+        S.pedal.utility.run_in_subprocess(S.experiments.run, settings=settings)
