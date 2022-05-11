@@ -44,6 +44,7 @@ if __name__ == "__main__":
         target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(1e3)),
         output=S.experiments.OutputSettings(
             wandb=False,
+            stderr=False,
             log=out and out / "log.jsonl",
             checkpoint=out and out / "model.npz",
         ),

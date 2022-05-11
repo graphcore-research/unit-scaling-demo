@@ -3,12 +3,13 @@
 import contextlib
 import copy
 import dataclasses
+import itertools as it
 import json
 import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, Optional
+from typing import Any, Dict, Generator, Iterable, Optional, Tuple
 
 import numpy as np
 import wandb
@@ -40,9 +41,12 @@ def log_wandb() -> Generator[utility.Logger, None, None]:
 
     try:
         yield _log
-    finally:
+    except:  # noqa: E722
         # Otherwise we hang (when started in a subprocess from a sweep)
-        wandb.finish()
+        wandb.finish(1)
+        raise
+    else:
+        wandb.finish(0)
 
 
 @contextlib.contextmanager
@@ -86,6 +90,7 @@ class DataSettings:
 class OutputSettings:
     """Output control settings."""
 
+    stderr: bool
     wandb: bool
     log: Optional[Path]
     checkpoint: Optional[Path]
@@ -125,14 +130,15 @@ class Settings:
             self.metadata.setdefault("slurm_job_id", os.environ["SLURM_JOB_ID"])
 
 
-def _loggers(settings: Settings, model: models.Model) -> Iterable[utility.Logger]:
-    yield log_stderr
-    if settings.output.wandb:
+def _loggers(settings: OutputSettings, model: models.Model) -> Iterable[utility.Logger]:
+    if settings.stderr:
+        yield log_stderr
+    if settings.wandb:
         yield log_wandb()
-    if settings.output.log:
-        yield log_jsonl(settings.output.log)
-    if settings.output.checkpoint:
-        yield log_checkpoint(settings.output.checkpoint, model)
+    if settings.log:
+        yield log_jsonl(settings.log)
+    if settings.checkpoint:
+        yield log_checkpoint(settings.checkpoint, model)
 
 
 def _settings_line(settings: Settings) -> Dict[str, Any]:
@@ -142,7 +148,7 @@ def _settings_line(settings: Settings) -> Dict[str, Any]:
     )
 
 
-def run(settings: Settings) -> None:
+def run(settings: Settings) -> Dict[str, Any]:
     """Run an experiment, logging results as requested."""
     data = datasets.load_character(
         settings.data.path, train="train.txt", valid="valid.txt", test="test.txt"
@@ -150,10 +156,52 @@ def run(settings: Settings) -> None:
     settings = copy.deepcopy(settings)
     settings.set_defaults(data)
 
+    last_eval_valid: Optional[Dict[str, Any]] = None
     with xpu.context(settings.target) as context:
         model = models.Model(settings.model)
-        with utility.logging(*_loggers(settings, model)) as log:
+        with utility.logging(*_loggers(settings.output, model)) as log:
             log(_settings_line(settings))
             log(dict(kind="stats", **model.weight_stats()))
             for item in training.train(model, data, context, settings.training):
                 log(item)
+                if item["kind"] == "eval_valid":
+                    last_eval_valid = item
+    assert last_eval_valid is not None
+    return last_eval_valid
+
+
+####################
+# LR sweep
+
+
+@dataclass
+class LrSweep:
+    """Learning rate sweep settings."""
+
+    base: Settings
+    step: float
+    threshold: float
+
+
+def find_learning_rate(settings: LrSweep) -> Tuple[Settings, float]:
+    """Perform a LR sweep, starting from `base`.
+
+    Tries: initial, initial * step, initial * step^2, ...
+
+    Until the validation loss is more than `best_loss + threshold`.
+    """
+    best_loss, best_settings = None, None
+    for n in it.count():
+        test_settings = copy.deepcopy(settings.base)
+        test_settings.training.optimiser.learning_rate *= settings.step**n
+        loss = run(test_settings)["valid_loss"]
+        print(
+            f"LR {test_settings.training.optimiser.learning_rate} -> {loss}",
+            file=sys.stderr,
+        )
+        if best_loss is None or loss < best_loss:
+            best_loss = loss
+            best_settings = test_settings
+        if best_loss + settings.threshold < loss:
+            return best_settings, best_loss
+    assert False, "unreachable code (infinite loop)"

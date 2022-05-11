@@ -441,6 +441,11 @@ class RNN(keras.layers.Layer):  # type:ignore[misc]
 class _Optimizer(keras.optimizers.Optimizer):  # type:ignore[misc]
     """A small extension of the keras base optimizer."""
 
+    @staticmethod
+    def _hyperparameter(value: float) -> tf.Variable:
+        """Create a training hyperparmaeter, as a Variable (for sake of executable caching)."""
+        return tf.Variable(value, dtype=tf.float32, trainable=False)
+
     def _add_slot_with_dtype(
         self, variable: tf.Variable, name: str, dtype: tf.DType
     ) -> tf.Variable:
@@ -468,9 +473,9 @@ class SgdM(_Optimizer):
         name: str = "SGD",
     ):
         super().__init__(name=name)
-        self.learning_rate = learning_rate
-        self.loss_scale = loss_scale
-        self.momentum = momentum
+        self.learning_rate = self._hyperparameter(learning_rate)
+        self.loss_scale = self._hyperparameter(loss_scale)
+        self.momentum = self._hyperparameter(momentum)
 
     def _update(self, gradient: tf.Tensor, variable: tf.Variable) -> List[tf.Operation]:
         if isinstance(gradient, tf.IndexedSlices):
@@ -519,18 +524,20 @@ class AdamW(_Optimizer):
         name: str = "AdamW",
     ):
         super().__init__(name=name)
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.beta_1 = beta_1
-        self.beta_2 = beta_2
-        self.epsilon = epsilon
+        self.learning_rate = self._hyperparameter(learning_rate)
+        self.weight_decay = self._hyperparameter(weight_decay)
+        self.beta_1 = self._hyperparameter(beta_1)
+        self.beta_2 = self._hyperparameter(beta_2)
+        self.epsilon = self._hyperparameter(epsilon)
         self._step_variable: tf.Variable = None
 
     @property
     def _step(self) -> tf.Variable:
         if self._step_variable is None:
             with tf.name_scope(self._name):
-                self._step_variable = self.add_weight("step", (), dtype=tf.int32)
+                self._step_variable = tf.Variable(
+                    0, dtype=tf.int32, name="step", trainable=False
+                )
         return self._step_variable
 
     def _update(

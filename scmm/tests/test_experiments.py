@@ -4,11 +4,22 @@ import json
 import os
 import unittest.mock as um
 from pathlib import Path
+from typing import Any, Dict
 
 import numpy as np
+import pytest
 
 from .. import datasets, experiments, models, training
 from ..pedal import xpu
+
+
+def test_log_wandb_finish_on_error():
+    with pytest.raises(ValueError), um.patch("wandb.init"), um.patch(
+        "wandb.finish"
+    ) as wandb_finish:
+        with experiments.log_wandb():
+            raise ValueError
+    wandb_finish.assert_called_once_with(1)
 
 
 def _test_settings(path: Path) -> experiments.Settings:
@@ -37,6 +48,7 @@ def _test_settings(path: Path) -> experiments.Settings:
         target=xpu.CpuSettings(compile=False),
         output=experiments.OutputSettings(
             wandb=True,
+            stderr=True,
             log=path / "log.jsonl",
             checkpoint=path / "model.npz",
         ),
@@ -98,3 +110,24 @@ def test_run_experiment(tmp_path: Path):  # pylint:disable=too-many-locals
 
     assert len([x["train_n_tokens"] for x in log_by_kind["eval_train"]]) == 3
     assert log_by_kind["eval_train"][-1]["train_loss"] < 2.5
+
+
+def test_find_learning_rate():
+    called_with_lr = []
+
+    def _fake_run(settings: experiments.Settings) -> Dict[str, Any]:
+        learning_rate = settings.training.optimiser.learning_rate
+        called_with_lr.append(learning_rate)
+        return dict(valid_loss=(15 - learning_rate) ** 2)
+
+    base = _test_settings(Path("fake"))
+    base.training.optimiser.learning_rate = 3
+    with um.patch("scmm.experiments.run", new_callable=lambda: _fake_run):
+        # LR = 3, 6, 12, 24, 48, ...
+        best, best_loss = experiments.find_learning_rate(
+            experiments.LrSweep(base, step=2, threshold=30)
+        )
+
+    np.testing.assert_allclose(best.training.optimiser.learning_rate, 12)
+    np.testing.assert_allclose(best_loss, 9)
+    np.testing.assert_allclose(called_with_lr, [3, 6, 12, 24])
