@@ -15,11 +15,14 @@ from ..pedal import xpu
 
 def test_log_wandb_finish_on_error():
     with pytest.raises(ValueError), um.patch("wandb.init"), um.patch(
-        "wandb.finish"
-    ) as wandb_finish:
+        "wandb.run"
+    ) as wandb_run, um.patch("wandb.finish") as wandb_finish:
         with experiments.log_wandb():
-            raise ValueError
+            raise ValueError("Bad things happened")
     wandb_finish.assert_called_once_with(1)
+    wandb_run.summary.update.assert_called_once_with(
+        dict(error="ValueError('Bad things happened',)")
+    )
 
 
 def _test_settings(path: Path) -> experiments.Settings:
