@@ -213,6 +213,6 @@ def find_learning_rate(
         if best_loss is None or loss < best_loss:
             best_loss = loss
             best_settings = test_settings
-        if best_loss + settings.threshold < loss:
+        if np.isnan(loss) or best_loss + settings.threshold < loss:
             return best_settings, best_loss
     assert False, "unreachable code (infinite loop)"
