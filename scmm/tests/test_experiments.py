@@ -45,7 +45,11 @@ def _test_settings(path: Path) -> experiments.Settings:
             ),
             steps=100,
             valid_interval=50,
-            optimiser=training.AdamW(learning_rate=0.05),
+            optimiser=training.AdamW(
+                learning_rate=0.05,
+                learning_rate_decay=1e-3,
+                scale_vector_learning_rate=False,
+            ),
             loss_scale=1,
         ),
         target=xpu.CpuSettings(compile=False),

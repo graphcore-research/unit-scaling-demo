@@ -37,12 +37,16 @@ if __name__ == "__main__":
             batch=S.datasets.BatchSettings(
                 sequences=8, sequence_length=256, overlap_length=32, loop_seed=None
             ),
-            steps=int(1e6),
-            valid_interval=int(1e4),
-            optimiser=S.training.AdamW(learning_rate=2**-6),
+            steps=int(2**20),
+            valid_interval=int(2**14),
+            optimiser=S.training.AdamW(
+                learning_rate=2**-6,
+                learning_rate_decay=2**-16,
+                scale_vector_learning_rate=False,
+            ),
             loss_scale=1,
         ),
-        target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(1e3)),
+        target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(2**10)),
         output=S.experiments.OutputSettings(
             stderr=False,
             wandb=True,

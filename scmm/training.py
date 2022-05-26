@@ -19,6 +19,8 @@ class SgdM:
     """SGD with momentum."""
 
     learning_rate: float
+    learning_rate_decay: float
+    scale_vector_learning_rate: bool
     momentum: float
     kind: str = "sgdm"
 
@@ -28,6 +30,8 @@ class AdamW:
     """Adam with weight decay."""
 
     learning_rate: float
+    learning_rate_decay: float
+    scale_vector_learning_rate: bool
     beta_1: float = 0.9
     beta_2: float = 0.999
     weight_decay: float = 0
@@ -75,6 +79,8 @@ def _get_optimiser(
         # loss_scale is safely ignored
         return layers.AdamW(
             learning_rate=settings.learning_rate,
+            learning_rate_decay=settings.learning_rate_decay,
+            scale_vector_learning_rate=settings.scale_vector_learning_rate,
             weight_decay=settings.weight_decay,
             beta_1=settings.beta_1,
             beta_2=settings.beta_2,
@@ -82,6 +88,8 @@ def _get_optimiser(
     if isinstance(settings, SgdM):
         return layers.SgdM(
             learning_rate=settings.learning_rate,
+            learning_rate_decay=settings.learning_rate_decay,
+            scale_vector_learning_rate=settings.scale_vector_learning_rate,
             loss_scale=loss_scale,
             momentum=settings.momentum,
         )

@@ -212,3 +212,13 @@ def test_adamw_indexed_slices():
         lambda: tf.reduce_sum(tf.gather(table, indices)), var_list=[table]
     )
     np.testing.assert_equal(table[:, 0].numpy() < 0, [True, False, True, False, True])
+
+
+def test_optimiser_decay_and_vector_learning_rate():
+    for optimiser, learning_rate in [(layers.SgdM, 1.0), (layers.AdamW, 0.1)]:
+        log = _train_sample_model(
+            optimiser(
+                learning_rate, learning_rate_decay=0.1, scale_vector_learning_rate=True
+            )
+        )
+        assert log[-1] < log[0] / 2, log

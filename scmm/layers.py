@@ -441,6 +441,19 @@ class RNN(keras.layers.Layer):  # type:ignore[misc]
 class _Optimizer(keras.optimizers.Optimizer):  # type:ignore[misc]
     """A small extension of the keras base optimizer."""
 
+    def __init__(self, name: str):
+        super().__init__(name=name)
+        self._step_variable: tf.Variable = None
+
+    @property
+    def _step(self) -> tf.Variable:
+        if self._step_variable is None:
+            with tf.name_scope(self._name):
+                self._step_variable = tf.Variable(
+                    0, dtype=tf.int32, name="step", trainable=False
+                )
+        return self._step_variable
+
     @staticmethod
     def _hyperparameter(value: float) -> tf.Variable:
         """Create a training hyperparmaeter, as a Variable (for sake of executable caching)."""
@@ -468,16 +481,22 @@ class SgdM(_Optimizer):
     def __init__(
         self,
         learning_rate: float = 0.01,
+        learning_rate_decay: float = 0.0,
+        scale_vector_learning_rate: bool = False,
         loss_scale: float = 1,
         momentum: float = 0,
         name: str = "SGD",
     ):
         super().__init__(name=name)
         self.learning_rate = self._hyperparameter(learning_rate)
+        self.learning_rate_decay = self._hyperparameter(learning_rate_decay)
+        self.scale_vector_learning_rate = scale_vector_learning_rate
         self.loss_scale = self._hyperparameter(loss_scale)
         self.momentum = self._hyperparameter(momentum)
 
-    def _update(self, gradient: tf.Tensor, variable: tf.Variable) -> List[tf.Operation]:
+    def _update(
+        self, gradient: tf.Tensor, variable: tf.Variable, scale: tf.Tensor
+    ) -> List[tf.Operation]:
         if isinstance(gradient, tf.IndexedSlices):
             # Convert to dense gradient, which is probably fine
             gradient = tf.math.unsorted_segment_sum(
@@ -493,8 +512,9 @@ class SgdM(_Optimizer):
         momentum_next = self.momentum * tf.cast(momentum_prev, tf.float32) + tf.cast(
             gradient, tf.float32
         )
-        step_size = self.learning_rate / self.loss_scale
-        variable_next = tf.cast(variable, tf.float32) - step_size * momentum_next
+        if self.scale_vector_learning_rate and len(variable.shape) == 1:
+            scale = scale / np.sqrt(variable.shape[0])
+        variable_next = tf.cast(variable, tf.float32) - scale * momentum_next
         return [
             variable.assign(tf.cast(variable_next, variable.dtype)),
             momentum_prev.assign(tf.cast(momentum_next, momentum_prev.dtype)),
@@ -505,8 +525,17 @@ class SgdM(_Optimizer):
         grads_and_vars: Iterable[Tuple[tf.Tensor, tf.Variable]],
         name: Optional[str] = None,
     ) -> tf.Operation:
+        step_prev = self._step
+        decay = tf.pow(2.0, -tf.cast(step_prev, tf.float32) * self.learning_rate_decay)
+        step = step_prev.assign(step_prev + 1)
         return tf.group(
-            *(self._update(grad, variable) for grad, variable in grads_and_vars),
+            step,
+            *(
+                self._update(
+                    grad, variable, scale=self.learning_rate * decay / self.loss_scale
+                )
+                for grad, variable in grads_and_vars
+            ),
             name=name,
         )
 
@@ -514,9 +543,11 @@ class SgdM(_Optimizer):
 class AdamW(_Optimizer):
     """AdamW (https://arxiv.org/abs/1711.05101)."""
 
-    def __init__(
+    def __init__(  # pylint:disable=too-many-arguments
         self,
         learning_rate: float = 0.001,
+        learning_rate_decay: float = 0.0,
+        scale_vector_learning_rate: bool = False,
         weight_decay: float = 0.004,
         beta_1: float = 0.9,
         beta_2: float = 0.999,
@@ -525,24 +556,19 @@ class AdamW(_Optimizer):
     ):
         super().__init__(name=name)
         self.learning_rate = self._hyperparameter(learning_rate)
+        self.learning_rate_decay = self._hyperparameter(learning_rate_decay)
+        self.scale_vector_learning_rate = scale_vector_learning_rate
         self.weight_decay = self._hyperparameter(weight_decay)
         self.beta_1 = self._hyperparameter(beta_1)
         self.beta_2 = self._hyperparameter(beta_2)
         self.epsilon = self._hyperparameter(epsilon)
-        self._step_variable: tf.Variable = None
-
-    @property
-    def _step(self) -> tf.Variable:
-        if self._step_variable is None:
-            with tf.name_scope(self._name):
-                self._step_variable = tf.Variable(
-                    0, dtype=tf.int32, name="step", trainable=False
-                )
-        return self._step_variable
 
     def _update(
         self, gradient: tf.Tensor, variable: tf.Variable, scale: tf.Tensor
     ) -> List[tf.Operation]:
+        if self.scale_vector_learning_rate and len(variable.shape) == 1:
+            scale = scale / np.sqrt(variable.shape[0])
+
         if isinstance(gradient, tf.IndexedSlices):
             # Convert to dense gradient, which is probably fine
             gradient = tf.math.unsorted_segment_sum(
@@ -580,9 +606,11 @@ class AdamW(_Optimizer):
         name: Optional[str] = None,
     ) -> tf.Operation:
         step_prev = self._step
+        decay = tf.pow(2.0, -tf.cast(step_prev, tf.float32) * self.learning_rate_decay)
         step = step_prev.assign(step_prev + 1)
         scale = (
             self.learning_rate
+            * decay
             * tf.sqrt(1 - self.beta_2 ** tf.cast(step, tf.float32))
             / (1 - self.beta_1 ** tf.cast(step, tf.float32))
         )

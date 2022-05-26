@@ -6,7 +6,14 @@ from ..pedal import xpu
 
 
 @pytest.mark.parametrize(
-    "optimiser", [training.AdamW(0.1), training.SgdM(0.1, 0.9)], ids=lambda s: s.kind
+    "optimiser",
+    [
+        training.AdamW(0.1, learning_rate_decay=0.0, scale_vector_learning_rate=False),
+        training.SgdM(
+            0.1, learning_rate_decay=0.0, scale_vector_learning_rate=False, momentum=0.9
+        ),
+    ],
+    ids=lambda s: s.kind,
 )
 def test_training(optimiser: training.Optimiser):
     data_sequence = np.arange(100) % 3
