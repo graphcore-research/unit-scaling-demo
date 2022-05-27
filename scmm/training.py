@@ -20,7 +20,6 @@ class SgdM:
 
     learning_rate: float
     learning_rate_decay: float
-    scale_vector_learning_rate: bool
     momentum: float
     kind: str = "sgdm"
 
@@ -31,7 +30,6 @@ class AdamW:
 
     learning_rate: float
     learning_rate_decay: float
-    scale_vector_learning_rate: bool
     beta_1: float = 0.9
     beta_2: float = 0.999
     weight_decay: float = 0
@@ -72,7 +70,9 @@ def eval_summary(results: Iterable[datasets.Batch]) -> Dict[str, float]:
 
 
 def _get_optimiser(
-    settings: Optimiser, loss_scale: float
+    settings: Optimiser,
+    loss_scale: float,
+    unit_scale: bool,
 ) -> keras.optimizers.Optimizer:
     if isinstance(settings, AdamW):
         # Note that Adam updates are invariant to fixed gradient scale, so
@@ -80,7 +80,7 @@ def _get_optimiser(
         return layers.AdamW(
             learning_rate=settings.learning_rate,
             learning_rate_decay=settings.learning_rate_decay,
-            scale_vector_learning_rate=settings.scale_vector_learning_rate,
+            scale_vector_learning_rate=unit_scale,
             weight_decay=settings.weight_decay,
             beta_1=settings.beta_1,
             beta_2=settings.beta_2,
@@ -89,7 +89,7 @@ def _get_optimiser(
         return layers.SgdM(
             learning_rate=settings.learning_rate,
             learning_rate_decay=settings.learning_rate_decay,
-            scale_vector_learning_rate=settings.scale_vector_learning_rate,
+            scale_vector_learning_rate=unit_scale,
             loss_scale=loss_scale,
             momentum=settings.momentum,
         )
@@ -97,7 +97,11 @@ def _get_optimiser(
 
 
 def train(
-    model: models.Model, data: datasets.Data, context: xpu.Context, settings: Settings
+    model: models.Model,
+    data: datasets.Data,
+    context: xpu.Context,
+    settings: Settings,
+    unit_scale: bool,
 ) -> Iterable[Dict[str, Any]]:
     """Train a model."""
 
@@ -105,7 +109,9 @@ def train(
         settings.batch.loop_seed is not None
     ), "please specify a seed for training batches"
 
-    optimiser = _get_optimiser(settings.optimiser, settings.loss_scale)
+    optimiser = _get_optimiser(
+        settings.optimiser, loss_scale=settings.loss_scale, unit_scale=unit_scale
+    )
 
     def _log(kind: str, step: int, data: Dict[str, Any]) -> Dict[str, Any]:
         return dict(kind=kind, step=step, time=datetime.datetime.now(), **data)

@@ -34,7 +34,6 @@ def _test_settings(path: Path) -> experiments.Settings:
             residual=None,
             sequence=models.Conv(kernel_size=5, groups=1),
             token=None,
-            unit_scale="0.2",
             dtype="float32",
             vocab_size=None,  # type:ignore[arg-type]
             seed=None,  # type:ignore[arg-type]
@@ -45,13 +44,10 @@ def _test_settings(path: Path) -> experiments.Settings:
             ),
             steps=100,
             valid_interval=50,
-            optimiser=training.AdamW(
-                learning_rate=0.05,
-                learning_rate_decay=1e-3,
-                scale_vector_learning_rate=False,
-            ),
+            optimiser=training.AdamW(learning_rate=0.05, learning_rate_decay=1e-3),
             loss_scale=1,
         ),
+        unit_scale="0.3",
         target=xpu.CpuSettings(compile=False),
         output=experiments.OutputSettings(
             wandb=True,

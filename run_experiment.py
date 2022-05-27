@@ -28,7 +28,6 @@ if __name__ == "__main__":
             residual=S.models.Residual(norm="pre", alpha="mean"),
             sequence=S.models.Conv(kernel_size=7, groups=8),
             token=S.models.FFN(multiple=4),
-            unit_scale="0.2",
             dtype="float32",
             vocab_size=None,  # type:ignore[arg-type]
             seed=None,  # type:ignore[arg-type]
@@ -40,12 +39,11 @@ if __name__ == "__main__":
             steps=int(2**20),
             valid_interval=int(2**14),
             optimiser=S.training.AdamW(
-                learning_rate=2**-6,
-                learning_rate_decay=2**-16,
-                scale_vector_learning_rate=False,
+                learning_rate=2**-6, learning_rate_decay=2**-16
             ),
             loss_scale=1,
         ),
+        unit_scale="0.3",
         target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(2**10)),
         output=S.experiments.OutputSettings(
             stderr=False,

@@ -105,6 +105,7 @@ class Settings:
     data: DataSettings
     model: models.Settings
     training: training.Settings
+    unit_scale: Optional[str]
     target: xpu.Settings
     output: OutputSettings
     metadata: Dict[str, Any]
@@ -157,14 +158,17 @@ def run(settings: Settings) -> Dict[str, Any]:
     )
     settings = copy.deepcopy(settings)
     settings.set_defaults(data)
+    assert settings.unit_scale in {None, "0.3"}
 
     last_eval_valid: Optional[Dict[str, Any]] = None
     with xpu.context(settings.target) as context:
-        model = models.Model(settings.model)
+        model = models.Model(settings.model, unit_scale=bool(settings.unit_scale))
         with utility.logging(*_loggers(settings.output, model)) as log:
             log(_settings_line(settings))
             log(dict(kind="stats", **model.weight_stats()))
-            for item in training.train(model, data, context, settings.training):
+            for item in training.train(
+                model, data, context, settings.training, bool(settings.unit_scale)
+            ):
                 log(item)
                 if item["kind"] == "eval_valid":
                     last_eval_valid = item

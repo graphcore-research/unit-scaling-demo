@@ -66,7 +66,6 @@ class Settings:
     residual: Optional[Residual]
     sequence: Union[Conv, Attention]
     token: Optional[FFN]
-    unit_scale: Optional[str]
     dtype: str
     seed: int
 
@@ -74,18 +73,18 @@ class Settings:
 class _ModelFactory:  # pylint:disable=missing-function-docstring
     """Builds the various kinds of model from settings."""
 
-    def __init__(self, settings: Settings, seeds: Iterator[int]):
+    def __init__(self, settings: Settings, unit_scale: bool, seeds: Iterator[int]):
         self.settings = settings
+        self.unit_scale = unit_scale
         self.dtype = tf.as_dtype(settings.dtype)
         self.seeds = seeds
-        assert settings.unit_scale in {None, "0.2"}
 
     def kernel_initializer(self) -> keras.initializers.Initializer:
-        assert not self.settings.unit_scale, "unit scale shouldn't use Glorot"
+        assert not self.unit_scale, "unit scale shouldn't use Glorot"
         return keras.initializers.GlorotUniform(seed=next(self.seeds))
 
     def embed(self) -> keras.layers.Layer:
-        if self.settings.unit_scale:
+        if self.unit_scale:
             return uscale.layers.Embedding(
                 self.settings.vocab_size,
                 self.settings.hidden_size,
@@ -103,7 +102,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
         )
 
     def conv(self, settings: Conv) -> keras.layers.Layer:
-        if self.settings.unit_scale:
+        if self.unit_scale:
             return uscale.layers.CausalConv1D(
                 self.settings.hidden_size,
                 kernel_size=settings.kernel_size,
@@ -125,7 +124,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
     def attention(self, settings: Attention) -> keras.layers.Layer:
         cls = (
             uscale.layers.MultiHeadAttention
-            if self.settings.unit_scale
+            if self.unit_scale
             else layers.MultiHeadAttention
         )
         return cls(
@@ -140,7 +139,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
     def rnn(self, settings: RNN) -> keras.layers.Layer:
         (cls, cell_cls) = (
             (uscale.layers.RNN, uscale.layers.RecurrentHighwayCell)
-            if self.settings.unit_scale
+            if self.unit_scale
             else (layers.RNN, layers.RecurrentHighwayCell)
         )
         return cls(
@@ -163,7 +162,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
 
     def token_layer(self) -> keras.layers.Layer:
         assert self.settings.token is not None
-        cls = uscale.layers.FFNLayer if self.settings.unit_scale else layers.FFNLayer
+        cls = uscale.layers.FFNLayer if self.unit_scale else layers.FFNLayer
         return cls(
             self.settings.token.multiple,
             dtype=self.dtype,
@@ -184,9 +183,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
             assert False, f"unexpected residual.alpha {self.settings.residual.alpha}"
 
         layer_cls = (
-            uscale.layers.ResidualLayer
-            if self.settings.unit_scale
-            else layers.ResidualLayer
+            uscale.layers.ResidualLayer if self.unit_scale else layers.ResidualLayer
         )
         return layer_cls(
             body, norm_type=self.settings.residual.norm, alpha=alpha, dtype=self.dtype
@@ -206,12 +203,12 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
     def norm(self) -> keras.layers.Layer:
         return (
             uscale.layers.LayerNormalization(dtype=self.dtype)
-            if self.settings.unit_scale
+            if self.unit_scale
             else layers.LayerNormalization(dtype=self.dtype)
         )
 
     def predict(self) -> keras.layers.Layer:
-        if self.settings.unit_scale:
+        if self.unit_scale:
             return uscale.layers.Dense(
                 self.settings.vocab_size,
                 scale_for="both_min",
@@ -232,7 +229,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
     ) -> Callable[[tf.Tensor, tf.Tensor, tf.Tensor], Tuple[tf.Tensor, tf.Tensor]]:
         return (
             uscale.ops.softmax_cross_entropy
-            if self.settings.unit_scale
+            if self.unit_scale
             else layers.softmax_cross_entropy
         )
 
@@ -242,12 +239,14 @@ class Model(keras.layers.Layer):  # type:ignore[misc]
 
     # pylint:disable=too-many-instance-attributes
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, unit_scale: bool):
         super().__init__()
         self.settings = settings
 
         factory = _ModelFactory(
-            settings, iter(utility.split_seed(settings.seed, 1000))  # plenty of seeds
+            settings,
+            unit_scale=unit_scale,
+            seeds=iter(utility.split_seed(settings.seed, 1000)),  # plenty of seeds
         )
         self.embed = factory.embed()
         self.embed_norm = factory.norm()

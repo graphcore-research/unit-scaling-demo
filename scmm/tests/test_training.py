@@ -8,10 +8,8 @@ from ..pedal import xpu
 @pytest.mark.parametrize(
     "optimiser",
     [
-        training.AdamW(0.1, learning_rate_decay=0.0, scale_vector_learning_rate=False),
-        training.SgdM(
-            0.1, learning_rate_decay=0.0, scale_vector_learning_rate=False, momentum=0.9
-        ),
+        training.AdamW(0.1, learning_rate_decay=0.0),
+        training.SgdM(0.1, learning_rate_decay=0.0, momentum=0.9),
     ],
     ids=lambda s: s.kind,
 )
@@ -27,10 +25,10 @@ def test_training(optimiser: training.Optimiser):
                 residual=None,
                 sequence=models.Conv(2, groups=1),
                 token=None,
-                unit_scale=None,
                 dtype="float32",
                 seed=100,
-            )
+            ),
+            unit_scale=False,
         )
         settings = training.Settings(
             datasets.BatchSettings(2, 8, 2, loop_seed=200),
@@ -39,6 +37,6 @@ def test_training(optimiser: training.Optimiser):
             optimiser=optimiser,
             loss_scale=1e3,
         )
-        log = list(training.train(model, data, context, settings))
+        log = list(training.train(model, data, context, settings, unit_scale=False))
         assert 0.5 * np.log(3) < log[0]["loss"]
         assert log[-1]["loss"] < 0.01 * np.log(3)
