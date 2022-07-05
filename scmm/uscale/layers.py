@@ -301,7 +301,7 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
                 "bsx,xAnh -> Abnsh",
                 input,
                 ops.scaling(
-                    forward=(input_size * self.head_size * self.heads) ** -0.25,
+                    forward=(3 * input_size * self.head_size * self.heads) ** -0.25,
                     backward=(batch_size * sequence_length) ** -0.5,
                 )(self.qkv),
             )
@@ -354,7 +354,9 @@ class RecurrentHighwayCell(keras.layers.Layer):  # type:ignore[misc]
         self, input: tf.Tensor, hidden: tf.Tensor, sequence_length: int
     ) -> tf.Tensor:
         batch_size = input.shape[0] * sequence_length
-        gates_scale = ((input.shape[1] + self.hidden_size) * self.hidden_size) ** -0.25
+        gates_scale = (
+            2 * (input.shape[1] + self.hidden_size) * self.hidden_size
+        ) ** -0.25
         gate_outputs = tf.concat([input, hidden], axis=1) @ ops.scaling(
             forward=gates_scale, backward=batch_size**-0.5
         )(self.gates)
