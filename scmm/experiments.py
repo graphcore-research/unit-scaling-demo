@@ -205,10 +205,12 @@ def find_learning_rate(
     def run_test(test_settings: Settings) -> float:
         if run_in_subprocess:
             # Run in subprocess for sake of isolation & memory use
-            return utility.run_in_subprocess(run, settings=test_settings)[
-                "valid_loss"
-            ]  # pragma: no cover
-        return run(settings=test_settings)["valid_loss"]
+            results = utility.run_in_subprocess(
+                run, settings=test_settings
+            )  # pragma: no cover
+        else:
+            results = run(settings=test_settings)
+        return results["valid_loss"]  # type:ignore[no-any-return]
 
     best_loss, best_settings = None, None
     for n in it.count():

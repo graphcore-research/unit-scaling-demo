@@ -92,7 +92,7 @@ if __name__ == "__main__":
         )
 
     if sweep:
-        sweep_settings = S.experiments.LrSweep(settings, step=4, threshold=0.05)
+        sweep_settings = S.experiments.LrSweep(settings, step=4, threshold=0.05, reps=1)
         S.experiments.find_learning_rate(settings=sweep_settings)
     else:
         # Run in subprocess so that the PVTI options "take"
