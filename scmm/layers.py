@@ -59,11 +59,12 @@ class LayerNormalization(keras.layers.Layer):  # type:ignore[misc]
             "gamma", shape=input_shape[-1], initializer=self.gamma_initializer
         )
 
-    @staticmethod
-    def _normalize(inputs: tf.Tensor) -> tf.Tensor:
+    def _normalize(self, inputs: tf.Tensor) -> tf.Tensor:
         inputs_fp32 = tf.cast(inputs, tf.float32)
         z = inputs_fp32 - tf.reduce_mean(inputs_fp32, axis=-1, keepdims=True)
-        normed = z / tf.sqrt(tf.reduce_mean(z**2, axis=-1, keepdims=True))
+        normed = z / tf.sqrt(
+            tf.reduce_mean(z**2, axis=-1, keepdims=True) + self.epsilon
+        )
         return tf.cast(normed, inputs.dtype)
 
     def call(self, inputs: tf.Tensor) -> tf.Tensor:

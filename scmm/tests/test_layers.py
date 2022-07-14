@@ -49,6 +49,17 @@ def test_softmax_cross_entropy():
     np.testing.assert_allclose(float(loss), np.log(20))
 
 
+def test_layer_normalization():
+    layer = layers.LayerNormalization()
+    layer.build((None, None, 4))
+    np.testing.assert_allclose(
+        layer(tf.constant([0.0, 0, 4, 4])[tf.newaxis, tf.newaxis, :]),
+        tf.constant([-1.0, -1, 1, 1])[tf.newaxis, tf.newaxis, :],
+        rtol=1e-3,
+    )
+    np.testing.assert_allclose(layer(tf.ones((2, 3, 4))), tf.zeros((2, 3, 4)))
+
+
 def test_pad_and_shift_layer():
     layer = layers.PadAndShiftLayer()
     layer.build((None, None, 11))
