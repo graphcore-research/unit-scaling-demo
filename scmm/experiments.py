@@ -187,6 +187,7 @@ class LrSweep:
     base: Settings
     step: float
     threshold: float
+    reps: int
 
 
 def find_learning_rate(
@@ -200,16 +201,20 @@ def find_learning_rate(
 
     Run in subprocess (by default) for sake of isolation & memory use.
     """
+
+    def run_test(test_settings: Settings) -> float:
+        if run_in_subprocess:
+            # Run in subprocess for sake of isolation & memory use
+            return utility.run_in_subprocess(run, settings=test_settings)[
+                "valid_loss"
+            ]  # pragma: no cover
+        return run(settings=test_settings)["valid_loss"]
+
     best_loss, best_settings = None, None
     for n in it.count():
         test_settings = copy.deepcopy(settings.base)
         test_settings.training.optimiser.learning_rate *= settings.step**n
-        # Run in subprocess for sake of isolation & memory use
-        loss = (
-            utility.run_in_subprocess(run, settings=test_settings)
-            if run_in_subprocess
-            else run(settings=test_settings)
-        )["valid_loss"]
+        loss = np.median([run_test(test_settings) for _ in range(settings.reps)])
         print(
             f"LR {test_settings.training.optimiser.learning_rate} -> {loss}",
             file=sys.stderr,

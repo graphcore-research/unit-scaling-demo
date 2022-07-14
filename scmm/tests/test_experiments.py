@@ -129,9 +129,10 @@ def test_find_learning_rate():
         # LR = 3, 6, 12, 24, 48, ...
         # Note - disable run_in_subprocess, otherwise our um.patch() wouldn't work
         best, best_loss = experiments.find_learning_rate(
-            experiments.LrSweep(base, step=2, threshold=30), run_in_subprocess=False
+            experiments.LrSweep(base, step=2, threshold=30, reps=3),
+            run_in_subprocess=False,
         )
 
     np.testing.assert_allclose(best.training.optimiser.learning_rate, 12)
     np.testing.assert_allclose(best_loss, 9)
-    np.testing.assert_allclose(called_with_lr, [3, 6, 12, 24])
+    np.testing.assert_allclose(called_with_lr, np.repeat([3, 6, 12, 24], 3))
