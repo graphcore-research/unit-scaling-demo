@@ -260,7 +260,7 @@ def relative_causal_reshape(scores: tf.Tensor) -> tf.Tensor:
     return tmp
 
 
-def causal_mask(attention: tf.Tensor, mask_value: float = -1000) -> tf.Tensor:
+def causal_mask(attention: tf.Tensor, mask_value: float) -> tf.Tensor:
     """Apply a causal mask to an attention matrix of shape (*, L, L)."""
     sequence_length = attention.shape[-1]
     return attention + tf.constant(
@@ -346,7 +346,8 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
         q += self.q_bias[:, tf.newaxis, :]
         a = tf.einsum("bnqh,bnkh->bnqk", q, k) * self.head_size**-0.5
         a += self._positional_weights(q)
-        a = causal_mask(a)
+        # Note: oddly, -1e3 can be insufficient in FP16 with no LS, causing "cheating"
+        a = causal_mask(a, mask_value=-3e4)
         a = tf.nn.softmax(a, axis=-1)
         o = tf.einsum("bnqk,bnkh->bqnh", a, v)
         return self.out(tf.reshape(o, o.shape[:-2] + (self.head_size * self.heads,)))

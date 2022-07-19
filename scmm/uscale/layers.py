@@ -311,7 +311,8 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
         )
         a = tf.einsum("bnqh,bnkh->bnqk", q, k) * self.head_size**-0.5
         a += self._positional_weights(q)
-        a = layers.causal_mask(a)
+        # Note: oddly, -1e3 can be insufficient in FP16 with no LS, causing "cheating"
+        a = layers.causal_mask(a, mask_value=-3e4)
         a = tf.nn.softmax(a, axis=-1)
         o = tf.einsum("bnqk,bnkh->bqnh", a, v)
         return self.out(tf.reshape(o, o.shape[:-2] + (self.head_size * self.heads,)))
