@@ -146,10 +146,9 @@ class Embedding(keras.layers.Layer):  # type:ignore[misc]
     def call(self, inputs: tf.Tensor) -> tf.Tensor:
         # We don't need to worry about inputs scaling, as it is non-differentiable
         batch_size = np.prod(inputs.shape)
+        # Scaling is based on "batch size per row"
         return tf.gather(
-            ops.scaling(backward=(self.table_size / batch_size) ** 0.5)(
-                self.embeddings
-            ),
+            ops.scaling(backward=self.table_size / batch_size)(self.embeddings),
             inputs,
         )
 
@@ -287,7 +286,7 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
             "sf,fnh->nsh",
             sins,
             ops.scaling(
-                forward=self.frequencies**-0.5, backward=sequence_length**-0.5
+                forward=self.frequencies**-0.5, backward=sequence_length**-1.0
             )(self.positional),
         )
         scores = tf.einsum("bnqh,nvh->bnqv", query, embeddings) * self.head_size**-0.5
@@ -302,11 +301,11 @@ class MultiHeadAttention(keras.layers.Layer):  # type:ignore[misc]
                 input,
                 ops.scaling(
                     forward=(3 * input_size * self.head_size * self.heads) ** -0.25,
-                    backward=(batch_size * sequence_length) ** -0.5,
+                    backward=(batch_size * sequence_length) ** -1.0,
                 )(self.qkv),
             )
         )
-        q += ops.scaling(backward=(batch_size * sequence_length) ** -0.5)(
+        q += ops.scaling(backward=(batch_size * sequence_length) ** -1.0)(
             self.q_bias[:, tf.newaxis, :]
         )
         a = tf.einsum("bnqh,bnkh->bnqk", q, k) * self.head_size**-0.5
@@ -359,9 +358,9 @@ class RecurrentHighwayCell(keras.layers.Layer):  # type:ignore[misc]
             2 * (input.shape[1] + self.hidden_size) * self.hidden_size
         ) ** -0.25
         gate_outputs = tf.concat([input, hidden], axis=1) @ ops.scaling(
-            forward=gates_scale, backward=batch_size**-0.5
+            forward=gates_scale, backward=batch_size**-1.0
         )(self.gates)
-        gate_outputs += ops.scaling(backward=batch_size**-0.5)(
+        gate_outputs += ops.scaling(backward=batch_size**-1.0)(
             self.gates_bias[:, tf.newaxis]
         )
         transform, update = tf.unstack(gate_outputs)
@@ -377,7 +376,7 @@ class RNN(layers.RNN):
         # Note: sbh = (sequence, batch, hidden)
         input_sbh = tf.transpose(input, (1, 0, 2))
         initial_hidden = tf.tile(
-            ops.scaling(backward=batch_size**-0.5)(self.initial_hidden[tf.newaxis]),
+            ops.scaling(backward=batch_size**-1.0)(self.initial_hidden[tf.newaxis]),
             (batch_size, 1),
         )
         output_sbh = tf.scan(
@@ -388,3 +387,15 @@ class RNN(layers.RNN):
             initializer=initial_hidden,
         )
         return tf.transpose(output_sbh, (1, 0, 2))
+
+
+class PadAndShiftLayer(layers.PadAndShiftLayer):
+    """Shifts sequence features one place to the right with a trainable padding vector."""
+
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
+        npad = inputs.shape[0]
+        pad = tf.tile(
+            ops.scaling(backward=npad**-1.0)(self.padding[tf.newaxis, tf.newaxis]),
+            [npad, 1, 1],
+        )
+        return tf.concat([pad, inputs[:, :-1, :]], axis=1)

@@ -65,7 +65,7 @@ def pointwise(
     assert len(weights.shape) == 2, "pointwise requires 2D rhs `weights`"
 
     input_size, output_size = weights.shape
-    backward_weights_scale = np.prod(inputs.shape[:-1]) ** -0.5
+    backward_weights_scale = np.prod(inputs.shape[:-1]) ** -1.0
 
     if scale_for == "separate":
         return scaling(forward=input_size**-0.5)(
@@ -106,7 +106,7 @@ def conv1d(
     forward_contraction = filter_width * channels_in // n_groups
     backward_contraction = filter_width / stride * channels_out // n_groups
     forward_scale = (forward_contraction * backward_contraction) ** -0.25
-    backward_scale = (output_length * batch_size) ** -0.5
+    backward_scale = (output_length * batch_size) ** -1.0
 
     return tf.nn.conv1d(
         input,
@@ -137,7 +137,7 @@ def conv2d(
         (kernel_height / strides) * (kernel_width / strides) * channels_out // n_groups
     )
     forward_scale = (forward_contraction * backward_contraction) ** -0.25
-    backward_scale = (output_area * batch_size) ** -0.5
+    backward_scale = (output_area * batch_size) ** -1.0
 
     return tf.nn.conv2d(
         input,
@@ -151,14 +151,14 @@ def add_bias(features: tf.Tensor, bias: tf.Tensor) -> tf.Tensor:
     """Add a bias (which should be zero-initialized), with a scaled backward pass."""
     assert len(bias.shape) == 1, "bias should be 1D"
     batch_size = np.prod(features.shape[:-1])
-    return features + scaling(backward=batch_size**-0.5)(bias)
+    return features + scaling(backward=batch_size**-1.0)(bias)
 
 
 def multiply_scale(features: tf.Tensor, scale: tf.Tensor) -> tf.Tensor:
     """Multiply by a scale tensor (which should be unit-initialized), with a scaled backward pass."""
     assert len(scale.shape) == 1, "scale should be 1D"
     batch_size = np.prod(features.shape[:-1])
-    return features * scaling(backward=batch_size**-0.5)(scale)
+    return features * scaling(backward=batch_size**-1.0)(scale)
 
 
 def batched_gather(tables: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:

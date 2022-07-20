@@ -211,7 +211,7 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
         if self.unit_scale:
             return uscale.layers.Dense(
                 self.settings.vocab_size,
-                scale_for="both_min",
+                scale_for="separate",
                 dtype=self.dtype,
                 seed=next(self.seeds),
             )
@@ -222,6 +222,8 @@ class _ModelFactory:  # pylint:disable=missing-function-docstring
         )
 
     def predict_padding(self) -> keras.layers.Layer:
+        if self.unit_scale:
+            return uscale.layers.PadAndShiftLayer(dtype=self.dtype)
         return layers.PadAndShiftLayer(dtype=self.dtype)
 
     def loss(

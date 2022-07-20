@@ -50,7 +50,7 @@ MODEL_SETTINGS = [
         (dataclasses.replace(settings, dtype=dtype), unit_scale)
         for settings in MODEL_SETTINGS
         for dtype in ["float32", "float16"]
-        for unit_scale in [None, "0.3"]
+        for unit_scale in [None, "0.4"]
     ],
     ids=repr,
 )

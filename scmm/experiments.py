@@ -158,7 +158,7 @@ def run(settings: Settings) -> Dict[str, Any]:
     )
     settings = copy.deepcopy(settings)
     settings.set_defaults(data)
-    assert settings.unit_scale in {None, "0.3"}
+    assert settings.unit_scale in {None, "0.4"}
 
     last_eval_valid: Optional[Dict[str, Any]] = None
     with xpu.context(settings.target) as context:
