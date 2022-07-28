@@ -1,0 +1,16 @@
+cppflags = -Wall -Wextra -Werror -Wno-return-type-c-linkage -std=c++17 -O2 -g -fPIC -fcolor-diagnostics
+linkflags = $cppflags -Wl,--no-undefined
+cpppath = -Ithird_party/poplar
+
+rule compile
+    command = clang++ -MD -MF$out.d $cppflags $cpppath -c $in -o $out
+    deps = gcc
+    depfile = $out.d
+
+rule linkso
+    command = clang++ $linkflags -shared $in -o $out $libs
+
+build build/quantisefp8.o: compile quantisefp8.cpp
+
+build build/libquantisefp8.so: linkso build/quantisefp8.o
+    libs = -lpoplar -lpopops -lpoputil
