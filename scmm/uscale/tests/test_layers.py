@@ -15,22 +15,22 @@ def test_initializers():
 
 
 def test_layer_dense():
-    layer = layers.Dense(200, seed=123)
-    out = testing.output_and_gradients(layer, (150, 100), seed=456)
-    assert out["outputs"].shape == (150, 200)
+    layer = layers.Dense(400, seed=123)
+    out = testing.output_and_gradients(layer, (3, 200), seed=456)
+    assert out["outputs"].shape == (3, 400)
     np.testing.assert_allclose(
-        np.std(out["outputs"]) * np.std(out["grad_inputs"]), 1, atol=0.01
+        np.std(out["outputs"]) * np.std(out["grad_inputs"]), 1, atol=0.05
     )
-    testing.assert_unit_scale(out["grad_kernel"], 0.01)
-    testing.assert_unit_scale(out["grad_bias"], 0.01)
+    testing.assert_unit_scale(out["grad_kernel"], 0.05)
+    testing.assert_unit_scale(out["grad_bias"], 0.05)
 
 
 def test_layer_causalconv1d():
     # Choose kernel size << sequence length to reduce the effect of padding
     # (which we don't account for in variance preservation)
-    layer = layers.CausalConv1D(filters=200, kernel_size=3, seed=321)
-    out = testing.output_and_gradients(layer, (30, 19, 100), seed=654)
-    assert out["outputs"].shape == (30, 19, 200)
+    layer = layers.CausalConv1D(filters=400, kernel_size=3, seed=321)
+    out = testing.output_and_gradients(layer, (4, 19, 200), seed=654)
+    assert out["outputs"].shape == (4, 19, 400)
     np.testing.assert_allclose(
         np.std(out["outputs"]) * np.std(out["grad_inputs"]), 1, atol=0.1
     )
@@ -51,14 +51,16 @@ def test_layer_causalconv1d():
 
 def test_layer_embedding():
     random = np.random.Generator(np.random.PCG64(seed=200))
-    layer = layers.Embedding(table_size=40, embeddings_size=50, seed=100)
+    layer = layers.Embedding(table_size=40, embeddings_size=300, seed=100)
     with tf.GradientTape() as tape:
-        outputs = layer(random.integers(layer.table_size, size=(8, 16)))
-    assert outputs.shape == (8, 16, 50)
+        outputs = layer(random.integers(layer.table_size, size=(3, 190)))
+    assert outputs.shape == (3, 190, 300)
     testing.assert_unit_scale(outputs, tol=0.1)
 
     grad_embeddings = tape.gradient(
-        outputs, layer.embeddings, random.normal(size=outputs.shape).astype(np.float32)
+        outputs,
+        layer.embeddings,
+        testing.correlated_batch_random(random, outputs.shape),
     )
     grad_embeddings = tf.math.unsorted_segment_sum(
         grad_embeddings.values, grad_embeddings.indices, grad_embeddings.shape[0]
@@ -104,8 +106,11 @@ def test_layer_multi_head_attention():
     out = testing.output_and_gradients(layer, (29, 90, 64), seed=300)
     assert out["outputs"].shape == (29, 90, 64)
     for key, _ in utility.named_weights(layer):
-        # Nowhere near unit scale, but we'll just check a broad range
-        assert 0.1 < np.std(out[f"grad_{key}"]) < 10
+        # When inputs are constant over the sequence axis, these gradients are
+        # approximately zero
+        if key not in {"positional", "q_bias"}:
+            # Nowhere near unit scale, but we'll just check a broad range
+            assert 0.1 < np.std(out[f"grad_{key}"]) < 10, f"for {key}"
 
 
 def test_rnn():  # also tests RecurrentHighwayCell
@@ -117,3 +122,11 @@ def test_rnn():  # also tests RecurrentHighwayCell
     for key, _ in utility.named_weights(layer):
         # Nowhere near unit scale, but we'll just check a broad range
         assert 0.1 < np.std(out[f"grad_{key}"]) < 10
+
+
+def test_pad_and_shift_layer():
+    layer = layers.PadAndShiftLayer()
+    out = testing.output_and_gradients(layer, (21, 5, 128), seed=49824)
+    assert out["outputs"].shape == (21, 5, 128)
+    testing.assert_unit_scale(out["grad_inputs"][:, :-1, :], 0.05)
+    testing.assert_unit_scale(out["grad_padding"], 0.05)

@@ -53,13 +53,17 @@ def check_op(
     for key, value in args.items():
         if isinstance(value, np.ndarray):
             inputs[key] = tf.constant(value)
+        elif key in {"input", "inputs"}:
+            # This is pretty hacky & in need of a refactor...
+            inputs[key] = tf.constant(testing.correlated_batch_random(random, value))
         else:
             inputs[key] = tf.constant(random.normal(size=value).astype(np.float32))
 
     with tf.GradientTape() as tape:
         tape.watch(inputs.values())
         scaled_out = scaled(**inputs, **(extra_args or {}))
-    output_grad = random.normal(size=scaled_out.shape).astype(np.float32)
+    # output_grad = random.normal(size=scaled_out.shape).astype(np.float32)
+    output_grad = testing.correlated_batch_random(random, scaled_out.shape)
     scaled_grad = tape.gradient(scaled_out, inputs, output_grad)
     with tf.GradientTape() as tape:
         tape.watch(inputs.values())
@@ -115,7 +119,7 @@ def test_pointwise(scale_for):
             inputs, weights
         ),
         seed=300,
-        args=dict(inputs=(3, 99, 200), weights=(200, 110)),
+        args=dict(inputs=(3, 33, 1000), weights=(1000, 500)),
     )
     testing.assert_unit_scale(out["grad"]["weights"], tol=0.05)
     std_out = np.std(out["out"])
@@ -141,7 +145,7 @@ def test_conv1d(padding, stride):
         ops.conv1d,
         tf.nn.conv1d,
         seed=400,
-        args=dict(input=(50, 27, 96), filters=(5, 96, 128)),
+        args=dict(input=(7, 27, 300), filters=(5, 300, 450)),
         extra_args=dict(stride=stride, padding=padding),
     )
     np.testing.assert_allclose(
@@ -159,13 +163,13 @@ def test_conv2d(padding, stride):
         ops.conv2d,
         tf.nn.conv2d,
         seed=500,
-        args=dict(input=(2, 20, 30, 8), filters=(2, 3, 8, 12)),
+        args=dict(input=(1, 10, 15, 300), filters=(2, 3, 300, 500)),
         extra_args=dict(strides=stride, padding=padding),
     )
     np.testing.assert_allclose(
-        np.std(out["out"]) * np.std(out["grad"]["input"]), 1, atol=0.1
+        np.std(out["out"]) * np.std(out["grad"]["input"]), 1, atol=0.2
     )
-    testing.assert_unit_scale(out["grad"]["filters"], tol=0.1)
+    testing.assert_unit_scale(out["grad"]["filters"], tol=0.2)
 
 
 def test_batched_gather():

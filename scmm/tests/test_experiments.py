@@ -47,7 +47,7 @@ def _test_settings(path: Path) -> experiments.Settings:
             optimiser=training.AdamW(learning_rate=0.05, learning_rate_decay=1e-3),
             loss_scale=1,
         ),
-        unit_scale="0.3",
+        unit_scale="0.4",
         target=xpu.CpuSettings(compile=False),
         output=experiments.OutputSettings(
             wandb=True,
