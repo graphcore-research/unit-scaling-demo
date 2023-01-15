@@ -116,10 +116,10 @@ def train(
     def _log(kind: str, step: int, data: Dict[str, Any]) -> Dict[str, Any]:
         return dict(kind=kind, step=step, time=datetime.datetime.now(), **data)
 
-    def _validate(step: int) -> Iterable[Dict[str, Any]]:
-        for part in ["valid", "train"]:
+    def _validate(step: int, test: bool) -> Iterable[Dict[str, Any]]:
+        for part in ["valid", "train"] + (["test"] if test else []):
             batch_settings = settings.batch
-            if part == "valid":
+            if part in ["valid", "test"]:
                 batch_settings = dataclasses.replace(batch_settings, loop_seed=None)
             batches = data.batches(part, batch_settings)
             if part == "train":
@@ -144,10 +144,9 @@ def train(
     )
     for step in it.count():
         if step >= settings.steps:
-            if settings.valid_interval is not None:
-                yield from _validate(step)
+            yield from _validate(step, test=True)
             break
         if settings.valid_interval is not None and step % settings.valid_interval == 0:
-            yield from _validate(step)
+            yield from _validate(step, test=False)
         results = next(train_steps)  # pylint:disable=stop-iteration-return
         yield _log("train_step", step, {k: v.tolist() for k, v in results.items()})

@@ -85,7 +85,7 @@ def logging(
 
         def apply(*args: Any, **kwargs: Any) -> None:
             for fn in functions:
-                fn(*args, **kwargs)  # type:ignore[operator]
+                fn(*args, **kwargs)
 
         yield apply
 

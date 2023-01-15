@@ -21,7 +21,7 @@ def test_log_wandb_finish_on_error():
             raise ValueError("Bad things happened")
     wandb_finish.assert_called_once_with(1)
     wandb_run.summary.update.assert_called_once_with(
-        dict(error="ValueError('Bad things happened',)")
+        dict(error="ValueError('Bad things happened')")
     )
 
 
@@ -79,7 +79,7 @@ def test_run_experiment(tmp_path: Path):  # pylint:disable=too-many-locals
     wandb_init_args = wandb_init.call_args[1]
     assert wandb_init_args.get("project") == "scaled-matmuls"
     assert wandb_init_args["config"]["metadata"]["ssub_id"] == "ssub123"
-    assert wandb_log.call_count == 2 * 3
+    assert wandb_log.call_count == 2 * 3 + 1
     wandb_finish.assert_called_once()
 
     # Checkpoint

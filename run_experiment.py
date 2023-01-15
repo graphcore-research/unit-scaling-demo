@@ -43,7 +43,7 @@ if __name__ == "__main__":
             ),
             loss_scale=1,
         ),
-        unit_scale="0.3",
+        unit_scale="0.4",
         target=S.pedal.xpu.IpuSettings(iterations_per_loop=int(2**10)),
         output=S.experiments.OutputSettings(
             stderr=False,

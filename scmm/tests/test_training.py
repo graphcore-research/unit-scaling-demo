@@ -15,7 +15,10 @@ from ..pedal import xpu
 )
 def test_training(optimiser: training.Optimiser):
     data_sequence = np.arange(100) % 3
-    data = datasets.Data(("a", "b", "c"), dict(train=data_sequence))
+    data = datasets.Data(
+        ("a", "b", "c"),
+        dict(train=data_sequence, valid=data_sequence, test=data_sequence),
+    )
     with xpu.context(xpu.CpuSettings()) as context:
         model = models.Model(
             models.Settings(
@@ -38,5 +41,6 @@ def test_training(optimiser: training.Optimiser):
             loss_scale=1e3,
         )
         log = list(training.train(model, data, context, settings, unit_scale=False))
-        assert 0.5 * np.log(3) < log[0]["loss"]
-        assert log[-1]["loss"] < 0.01 * np.log(3)
+        train_log = [line for line in log if line["kind"] == "train_step"]
+        assert 0.5 * np.log(3) < train_log[0]["loss"]
+        assert train_log[-1]["loss"] < 0.01 * np.log(3)

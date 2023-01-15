@@ -53,7 +53,7 @@ extern "C" poplar::program::Program Build(poplar::Graph& graph,
     poplar::program::Sequence program;
     poplar::DebugContext di(debugPrefix);
 
-    poplar::QuarterMetadata::Format format;
+    poplar::QuarterMetadata::Format format(poplar::QuarterMetadata::Format::F143);
     int exponentBias;
     std::istringstream in(attributes);
     in >> format >> exponentBias;
