@@ -64,7 +64,7 @@ class Settings:
     hidden_size: int
     depth: int
     residual: Optional[Residual]
-    sequence: Union[Conv, Attention]
+    sequence: Union[Conv, Attention, RNN]
     token: Optional[FFN]
     dtype: str
     seed: int
