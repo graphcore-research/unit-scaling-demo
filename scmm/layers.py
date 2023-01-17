@@ -15,11 +15,12 @@ def batched_gather(tables: tf.Tensor, indices: tf.Tensor) -> tf.Tensor:
     # Implemented here and in uscale.ops to avoid circular dependency issues
     # pylint:disable=R0801
     assert len(tables.shape) == len(indices.shape) + 1
-    offsets = (
-        np.arange(np.prod(indices.shape)).reshape(indices.shape) * tables.shape[-1]
+    # Use a one-hot encoding to save code memory
+    return tf.squeeze(
+        tf.one_hot(indices, tables.shape[-1], dtype=tables.dtype)[..., tf.newaxis, :]
+        @ tables[..., tf.newaxis],
+        [-1, -2],
     )
-    values = tf.gather(tf.reshape(tables, (-1,)), tf.reshape(indices + offsets, (-1,)))
-    return tf.reshape(values, indices.shape)
 
 
 def softmax_cross_entropy(

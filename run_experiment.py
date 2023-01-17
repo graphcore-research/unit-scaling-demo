@@ -26,7 +26,9 @@ if __name__ == "__main__":
             hidden_size=128,
             depth=8,
             residual=S.models.Residual(norm="pre", alpha="mean"),
-            sequence=S.models.Conv(kernel_size=7, groups=8),
+            sequence=S.models.Attention(
+                heads=2, head_size=64, frequencies=128, max_period=1024
+            ),
             token=S.models.FFN(multiple=4),
             dtype="float32",
             vocab_size=None,  # type:ignore[arg-type]
@@ -60,9 +62,11 @@ if __name__ == "__main__":
 
     if profile:
         profile.mkdir(parents=True, exist_ok=True)
+        # os.environ["POPLIBS_LOG_LEVEL"] = "INFO"
         os.environ["POPLAR_ENGINE_OPTIONS"] = json.dumps(
             {
                 "autoReport.all": True,
+                # "autoReport.outputExecutionProfile": False,
                 "autoReport.outputArchive": False,
                 "autoReport.directory": str(profile),
                 "debug.allowOutOfMemory": True,
