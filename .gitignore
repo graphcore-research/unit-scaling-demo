@@ -1,4 +1,7 @@
-.ipynb_checkpoints/
+.cache
+.ipynb_checkpoints
+__pycache__
+.venv
 
 /local
 /out
