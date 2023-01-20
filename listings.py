@@ -1,119 +1,126 @@
 """Code listings source and quick tests."""
 
 import numpy as np
-import torch
+from torch import autograd, tensor, randn, nn, matmul
 from torch.nn import Parameter, LayerNorm
-from torch import tensor, pi, relu, randn, nn
+from torch.nn.functional import gelu
 
 
-# Appendix - scaling
+# scaled.py
 
-class ScaledGrad(torch.autograd.Function):
+class ScaledGrad(autograd.Function):
   @staticmethod
-  def forward(ctx, x, sy, sg):
+  def forward(ctx, X, alpha, beta):
     ctx.save_for_backward(
-      tensor(sg, dtype=x.dtype))
-    return sy * x
+      tensor(beta, dtype=X.dtype))
+    return alpha * X
 
   @staticmethod
-  def backward(ctx, gy):
-    sg, = ctx.saved_tensors
-    return sg * gy, None, None
+  def backward(ctx, grad_Y):
+    beta, = ctx.saved_tensors
+    return beta * grad_Y, None, None
 
-def scaled(x, sy=1, sg=1):
-  "Compute `y = x * sy` forward,\
-  and `gx = gy * sg` backward."
-  return ScaledGrad.apply(x, sy, sg)
+def scaled(X, alpha=1, beta=1):
+  # Compute `Y = X * alpha` forward,
+  # `grad_X = grad_Y * beta` backward.
+  return ScaledGrad.apply(X, alpha, beta)
 
 
-# Appendix - ops
+# additional.py
 
 def scaled_matmul(
-  a, b,
-  constrain_a = True,
-  constrain_b = True,
+  A, B,
+  constrain_A=True,
+  constrain_B=True,
 ):
-  (m, k), (_, n) = a.shape, b.shape
-  sy = k ** -(1/2)
-  sa = n ** -(1/2)
-  sb = m ** -(1/2)
+  (m, k), (_, n) = A.shape, B.shape
+  alpha = k ** -(1/2)
+  beta_A = n ** -(1/2)
+  beta_B = m ** -(1/2)
 
-  if constrain_a and constrain_b:
-    sy = sa = sb = (sy*sa*sb) ** (1/3)
-  elif constrain_a:
-    sy = sa = (sy*sa) ** (1/2)
-  elif constrain_b:
-    sy = sb = (sy*sb) ** (1/2)
+  if constrain_A and constrain_B:
+    alpha = beta_A = beta_B = \
+      (alpha * beta_A * beta_B) ** (1/3)
+  elif constrain_A:
+    alpha = beta_A = \
+      (alpha * beta_A) ** (1/2)
+  elif constrain_B:
+    alpha = beta_B = \
+      (alpha * beta_B) ** (1/2)
 
-  a = scaled(a, sg=sa)
-  b = scaled(b, sg=sb)
-  return scaled(a @ b, sy=sy)
+  A = scaled(A, beta=beta_A)
+  B = scaled(B, beta=beta_B)
+  return scaled(matmul(A, B), alpha)
 
-def scaled_relu(x):
-  s = ((1 - 1/pi) / 4) ** -(1/4)
-  return scaled(relu(x), sy=s, sg=s)
+def scaled_gelu(X):
+  return 1.5876 * gelu(X)
 
 class ScaledLayerNorm(nn.LayerNorm):
   def forward(self, x):
-    sg = (
+    beta = (
       np.prod(self.normalized_shape)
       / x.nelement()
     ) ** 0.5
     return nn.functional.layer_norm(
         x,
         self.normalized_shape,
-        scaled(self.weight, sg=sg),
-        scaled(self.bias, sg=sg),
+        scaled(self.weight, beta=beta),
+        scaled(self.bias, beta=beta),
         self.eps,
     )
 
 
-# Body - op
+# projection.py
 
-def scaled_projection(x, W):
-  (B, _), (dx, dy) = x.shape, W.shape
-  sy = (dx * dy) ** -(1/4)
-  sW = B ** -(1/2)
-  x = scaled(x, sg=sy)
-  W = scaled(W, sg=sW)
-  return scaled(x @ W, sy=sy)
+# +first 3 lines of `def scaled``
+
+def scaled_projection(X, W):
+  (b, _), (m, n) = X.shape, W.shape
+  alpha = beta_X = (m * n) ** -(1/4)
+  beta_W = b ** -(1/2)
+  X = scaled(X, beta=beta_X)
+  W = scaled(W, beta=beta_W)
+  return scaled(matmul(X, W), alpha)
 
 
-# Body - layer comparison
+# ffn.py
 
 class FFN(nn.Module):
-  def __init__(self, dx, dFFN):
+  def __init__(self, nX, nFFN):
     super().__init__()
-    s_init = (dx * dFFN)**-(1/4)
-    self.up = Parameter(
-      randn(dx, dFFN) * s_init)
-    self.down = Parameter(
-      randn(dFFN, dx) * s_init)
-    self.norm = LayerNorm(dx)
+    self.norm = LayerNorm(nX)
+    sigma = (nX * nFFN) ** -(1/4)
+    self.W_1 = Parameter(
+      randn(nX, nFFN) * sigma)
+    self.W_2 = Parameter(
+      randn(nFFN, nX) * sigma)
 
-  def forward(self, x):
-    z = self.norm(x)
-    z = z @ self.up
-    z = relu(z)
-    z = z @ self.down
-    return x + z
+  def forward(self, X):
+    Z = self.norm(X)
+    Z = matmul(Z, self.W_1)
+    Z = gelu(Z)
+    Z = matmul(Z, self.W_2)
+    return X + Z
+
+
+# ffn_scaled.py
 
 class ScaledFFN(nn.Module):
-  def __init__(self, dx, dFFN, tau):
+  def __init__(self, nX, nFFN, tau):
     super().__init__()
-    self.up = Parameter(randn(dx, dFFN))
-    self.down = Parameter(randn(dFFN, dx))
-    self.norm = ScaledLayerNorm(dx)
+    self.norm = ScaledLayerNorm(nX)
+    self.W_1 = Parameter(randn(nX, nFFN))
+    self.W_2 = Parameter(randn(nFFN, nX))
     self.tau = tau
 
-  def forward(self, x):
-    sx = (1-self.tau)**(1/2)
-    sz = (self.tau)**(1/2)
-    z = self.norm(scaled(x, sg=sz))
-    z = scaled_projection(z, self.up)
-    z = scaled_relu(z)
-    z = scaled_projection(z, self.down)
-    return x * sx + scaled(z, sy=sz)
+  def forward(self, X):
+    a = (1 - self.tau) ** (1/2)
+    b = self.tau ** (1/2)
+    Z = self.norm(scaled(X, beta=b))
+    Z = scaled_projection(Z, self.W_1)
+    Z = scaled_gelu(Z)
+    Z = scaled_projection(Z, self.W_2)
+    return X * a + scaled(Z, b)
 
 
 # Tests
@@ -137,10 +144,10 @@ def test_scaled_projection():
   y.backward(dy)
   T.testing.assert_close(float(T.std(y) * T.std(a.grad) * T.std(b.grad)), 1.0, atol=1e-2, rtol=0)
 
-def test_scaled_relu():
+def test_scaled_gelu():
   T.manual_seed(2000)
   x = T.randn(20000, requires_grad=True)
-  y = scaled_relu(x)
+  y = scaled_gelu(x)
   y.backward(T.randn_like(y))
   T.testing.assert_close(float(T.std(y) * T.std(x.grad)), 1.0, atol=1e-2, rtol=0)
 
