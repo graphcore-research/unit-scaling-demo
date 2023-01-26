@@ -6,7 +6,7 @@ from torch.nn import Parameter, LayerNorm
 from torch.nn.functional import gelu
 
 
-# scaled.py
+# appendix.py
 
 class ScaledGrad(autograd.Function):
   @staticmethod
@@ -21,17 +21,12 @@ class ScaledGrad(autograd.Function):
     return beta * grad_Y, None, None
 
 def scaled(X, alpha=1, beta=1):
-  # Compute `Y = X * alpha` forward,
-  # `grad_X = grad_Y * beta` backward.
+  # Forward: Y = X * alpha
+  # Backward: grad_X = grad_Y * beta
   return ScaledGrad.apply(X, alpha, beta)
 
-
-# additional.py
-
 def scaled_matmul(
-  A, B,
-  constrain_A=True,
-  constrain_B=True,
+  A, B, constrain_A=True, constrain_B=True,
 ):
   (m, k), (_, n) = A.shape, B.shape
   alpha = k ** -(1/2)
@@ -42,11 +37,9 @@ def scaled_matmul(
     alpha = beta_A = beta_B = \
       (alpha * beta_A * beta_B) ** (1/3)
   elif constrain_A:
-    alpha = beta_A = \
-      (alpha * beta_A) ** (1/2)
+    alpha = beta_A = (alpha * beta_A) ** (1/2)
   elif constrain_B:
-    alpha = beta_B = \
-      (alpha * beta_B) ** (1/2)
+    alpha = beta_B = (alpha * beta_B) ** (1/2)
 
   A = scaled(A, beta=beta_A)
   B = scaled(B, beta=beta_B)
@@ -86,14 +79,14 @@ def scaled_projection(X, W):
 # ffn.py
 
 class FFN(nn.Module):
-  def __init__(self, nX, nFFN):
+  def __init__(self, d, h):
     super().__init__()
-    self.norm = LayerNorm(nX)
-    sigma = (nX * nFFN) ** -(1/4)
+    self.norm = LayerNorm(d)
+    sigma = (d * h) ** -(1/4)
     self.W_1 = Parameter(
-      randn(nX, nFFN) * sigma)
+      randn(d, h) * sigma)
     self.W_2 = Parameter(
-      randn(nFFN, nX) * sigma)
+      randn(h, d) * sigma)
 
   def forward(self, X):
     Z = self.norm(X)
@@ -106,20 +99,20 @@ class FFN(nn.Module):
 # ffn_scaled.py
 
 class ScaledFFN(nn.Module):
-  def __init__(self, nX, nFFN, tau):
+  def __init__(self, d, h, tau):
     super().__init__()
-    self.norm = ScaledLayerNorm(nX)
-    self.W_1 = Parameter(randn(nX, nFFN))
-    self.W_2 = Parameter(randn(nFFN, nX))
+    self.norm = ScaledLayerNorm(d)
+    self.W1 = Parameter(randn(d, h))
+    self.W2 = Parameter(randn(h, d))
     self.tau = tau
 
   def forward(self, X):
     a = (1 - self.tau) ** (1/2)
     b = self.tau ** (1/2)
     Z = self.norm(scaled(X, beta=b))
-    Z = scaled_projection(Z, self.W_1)
+    Z = scaled_projection(Z, self.W1)
     Z = scaled_gelu(Z)
-    Z = scaled_projection(Z, self.W_2)
+    Z = scaled_projection(Z, self.W2)
     return X * a + scaled(Z, b)
 
 
