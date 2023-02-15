@@ -1,6 +1,21 @@
 # Unit scaling (CharLM)
 
-We'd like weights, activations & gradients all to be unit-normal at initialisation. To achieve this, we will introduce separate scaling factors for activations in the forwards pass and for gradients in the backwards pass.
+We'd like weights, activations & gradients all to be unit-variance at initialisation. To achieve this, we will introduce separate scaling factors for activations in the forwards pass and for gradients in the backwards pass.
+
+**Overview:**
+ - Technique - Unit Scaling
+ - Task - Character Language Modelling
+ - Dataset - [WikiText-103](https://www.salesforce.com/products/einstein/ai-research/the-wikitext-dependency-language-modeling-dataset/)
+ - Framework - [TF2/Keras](https://www.tensorflow.org/), [Poplar SDK](https://www.graphcore.ai/products/poplar)
+ - Logging - [WandB](https://wandb.ai)
+
+**Structure:**
+ - [run_experiment.py](run_experiment.py) - configuration & entry point for a single experiment
+ - [run_sweep.py](run_sweep.py) - sweep logic & configuration
+ - [scmm/](scmm) - core Python package and baseline implementation
+   - [scmm/uscale/](scmm/uscale) - unit scaling implementation
+   - [scmm/pedal/](scmm/pedal) - platform-specific adapters
+ - [dev](dev) - development task launch script (tests, lint, etc)
 
 ## Usage
 
@@ -16,8 +31,24 @@ python run_experiment.py
 
 ## To reproduce
 
-Our test result sweeps are described by `run_sweep.py`. By default this assumes the data is under /home/research-datasets/wikitext103_raw (train.txt, valid.txt, test.txt) and that the user is logged into WandB.
+Our test result sweeps are described by `run_sweep.py`. By default this assumes the data is under /home/research-datasets/wikitext103_raw (`train.txt`, `valid.txt`, `test.txt`) and that the user is logged into WandB.
 
 ```bash
-python3 run_sweep.py
+python run_sweep.py
 ```
+
+## References & license
+
+Copyright (c) 2023 Graphcore Ltd. Licensed under the MIT License.
+
+The included code is released under a MIT license (see [LICENSE](LICENSE)).
+
+Our dependencies are:
+
+| Component | About | License |
+| --- | --- | --- |
+| WandB | Weights and Biases client library ([website](https://wandb.ai/)), for optional logging to wandb servers | MIT |
+
+We also use additional Python dependencies for development/testing (see [requirements-dev.txt](requirements-dev.txt)).
+
+The WikiText-103 dataset is licenced under the Creative Commons Attribution-ShareAlike License.
