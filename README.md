@@ -5,7 +5,7 @@ We'd like weights, activations & gradients all to be unit-variance at initialisa
 **Overview:**
  - Technique - Unit Scaling
  - Task - Character Language Modelling
- - Dataset - [WikiText-103](https://www.salesforce.com/products/einstein/ai-research/the-wikitext-dependency-language-modeling-dataset/)
+ - Dataset - [WikiText-103 (raw)](https://www.salesforce.com/products/einstein/ai-research/the-wikitext-dependency-language-modeling-dataset/)
  - Framework - [TF2/Keras](https://www.tensorflow.org/), [Poplar SDK](https://www.graphcore.ai/products/poplar)
  - Logging - [WandB](https://wandb.ai)
 
