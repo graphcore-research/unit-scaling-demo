@@ -1,3 +1,5 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
 """General purpose layers and functions."""
 
 from typing import Iterable, List, Optional, Tuple, Type

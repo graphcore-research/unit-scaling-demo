@@ -1,3 +1,5 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
 import functools
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 

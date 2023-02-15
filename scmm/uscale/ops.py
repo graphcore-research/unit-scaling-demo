@@ -1,3 +1,5 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
 """Unit scaling - basic, portable operations."""
 
 from typing import Callable, Optional, Tuple

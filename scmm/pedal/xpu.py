@@ -1,3 +1,5 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
 """General utilities to unify CPU/IPU programming."""
 
 from dataclasses import dataclass

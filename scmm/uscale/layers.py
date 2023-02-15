@@ -1,3 +1,5 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
 """Keras layers replacements with unit scaling."""
 
 from typing import Optional, Tuple
