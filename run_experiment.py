@@ -1,3 +1,5 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
 """Run a single experiment."""
 
 import dataclasses

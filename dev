@@ -38,7 +38,7 @@ def cli(*args: Any, **kwargs: Any) -> Callable[[T], T]:
 
 # Commands
 
-SOURCE = [Path(f) for f in ["scmm", "custom_op", "dev", "run_experiment.py"]]
+SOURCE = [Path(f) for f in ["scmm", "dev", "run_experiment.py", "run_sweep.py"]]
 
 
 def _sources(core: bool, script: bool, tests: bool) -> Iterable[Path]:
@@ -61,12 +61,6 @@ PYLINT_TEST_DISABLE = [
     "unused-argument",
     "blacklisted-name",
 ]
-
-
-@cli()
-def build() -> None:
-    """build custom op(s)"""
-    run(["ninja", "-C", "custom_op"])
 
 
 @cli("-c", "--check", dest="no_format", action="store_true")
@@ -108,12 +102,10 @@ def lint() -> None:
 @cli("-s", dest="capture", action="store_false", help="suppress capture")
 def test(only: Optional[str], capture: bool) -> None:
     """run unit tests"""
-    build()
     run(
         [
             "pytest",
             "scmm",
-            "custom_op",
             None if only else "--cov=scmm",
             None if capture else "--capture=no",
             f"-k {only}" if only else None,
@@ -125,7 +117,7 @@ def test(only: Optional[str], capture: bool) -> None:
 def check_copyright_headers() -> None:
     """check for Graphcore copyright headers on relevant files"""
     command = (
-        "find dev scmm/ -type f"
+        "find scmm/ dev *.py -type f"
         " | grep -Ev '(.pyc|.txt|.json)$'"
         " | xargs grep -L 'Copyright (c) 202. Graphcore Ltd[.] All rights reserved[.]'"
     )

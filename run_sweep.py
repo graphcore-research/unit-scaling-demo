@@ -1,5 +1,6 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
 import copy
-import subprocess
 import dataclasses
 import itertools as it
 import multiprocessing
