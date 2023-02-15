@@ -1,13 +1,9 @@
 -r requirements.txt
-black
-isort
-jupyterlab
-mypy
-pandas
-pylint
-pytest
-pytest-cov
-seaborn
-tabulate
-tqdm
-types-dataclasses
+black==23.1.0
+isort==5.12.0
+mypy==1.0.0
+mypy-extensions==1.0.0
+pylint==2.16.2
+pytest==7.2.1
+pytest-cov==4.0.0
+types-dataclasses==0.6.6

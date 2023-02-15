@@ -19,11 +19,16 @@ We'd like weights, activations & gradients all to be unit-variance at initialisa
 
 ## Usage
 
+This code has been tested on [Poplar SDK](https://www.graphcore.ai/downloads) 3.1.0+1205.
+
 ```bash
 python3 -m venv .venv
 # Append to .venv/bin/activate:
-# source PATH/TO/POPLAR_SDK/enable.sh
+# source PATH/TO/POPLAR_SDK/enable
 source .venv/bin/activate
+pip install wheel
+pip install $POPLAR_SDK_ENABLED/../tensorflow-2.6.3+gc3.1.0+246224+2b7af067dae+amd_znver1-cp38-cp38-linux_x86_64.whl
+pip install $POPLAR_SDK_ENABLED/../keras-2.6.0+gc3.1.0+246230+88e2debf-py2.py3-none-any.whl
 pip install -r requirements.txt
 
 python run_experiment.py
