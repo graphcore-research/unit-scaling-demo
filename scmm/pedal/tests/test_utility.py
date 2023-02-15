@@ -57,6 +57,7 @@ def test_logging():
 
 def test_named_layers_and_weights():
     class TestModel(keras.layers.Layer):
+        # pylint:disable=too-few-public-methods
         def __init__(self):
             super().__init__()
             self.projection = keras.layers.Dense(20)

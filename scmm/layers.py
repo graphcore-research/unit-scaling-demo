@@ -446,6 +446,8 @@ class RNN(keras.layers.Layer):  # type:ignore[misc]
 class _Optimizer(keras.optimizers.Optimizer):  # type:ignore[misc]
     """A small extension of the keras base optimizer."""
 
+    # pylint:disable=too-few-public-methods
+
     def __init__(self, name: str):
         super().__init__(name=name)
         self._step_variable: tf.Variable = None
@@ -482,6 +484,8 @@ class _Optimizer(keras.optimizers.Optimizer):  # type:ignore[misc]
 
 class SgdM(_Optimizer):
     """SGD with momentum and loss scaling support."""
+
+    # pylint:disable=too-few-public-methods
 
     def __init__(
         self,
@@ -547,6 +551,8 @@ class SgdM(_Optimizer):
 
 class AdamW(_Optimizer):
     """AdamW (https://arxiv.org/abs/1711.05101)."""
+
+    # pylint:disable=too-few-public-methods
 
     def __init__(  # pylint:disable=too-many-arguments
         self,

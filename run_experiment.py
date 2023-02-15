@@ -13,7 +13,6 @@ import scmm as S
 
 # ssub -t mk2 -n 1 -- python run_experiment.py
 if __name__ == "__main__":
-
     out, profile, sweep = None, None, False
     # profile = Path("out/profiles/dev")
     # out = Path("out/training/dev")

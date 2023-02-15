@@ -7,3 +7,4 @@ pylint==2.16.2
 pytest==7.2.1
 pytest-cov==4.0.0
 types-dataclasses==0.6.6
+typing-extensions==4.5.0  # version required by pylint

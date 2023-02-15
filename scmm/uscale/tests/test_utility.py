@@ -40,6 +40,7 @@ def test_activation_tracker_example():
 
 def test_activation_tracker_multiple_outputs():
     class Duplicate(keras.layers.Layer):
+        # pylint:disable=too-few-public-methods
         def call(self, x: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
             return x, x
 

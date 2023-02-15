@@ -48,9 +48,8 @@ def log_wandb() -> Generator[utility.Logger, None, None]:
         wandb.run.summary.update(dict(error=repr(exc)))  # type:ignore[union-attr]
         wandb.finish(1)
         raise
-    else:
-        # Always call finish(), otherwise we hang (when started in a subprocess from a sweep)
-        wandb.finish(0)
+    # Always call finish(), otherwise we hang (when started in a subprocess from a sweep)
+    wandb.finish(0)
 
 
 @contextlib.contextmanager

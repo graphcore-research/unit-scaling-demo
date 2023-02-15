@@ -63,7 +63,6 @@ def _test_settings(path: Path) -> experiments.Settings:
 
 
 def test_run_experiment(tmp_path: Path):  # pylint:disable=too-many-locals
-
     with contextlib.ExitStack() as stack:
         wandb_init = stack.enter_context(um.patch("wandb.init"))
         wandb_log = stack.enter_context(um.patch("wandb.log"))

@@ -125,7 +125,11 @@ def check_copyright_headers() -> None:
     # Note: grep exit codes are not consistent between versions, so we don't use check=True
     output = (
         subprocess.run(
-            command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            command,
+            shell=True,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
         .stdout.decode()
         .strip()
