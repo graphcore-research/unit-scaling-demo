@@ -1,3 +1,5 @@
+# Copyright (c) 2023 Graphcore Ltd. All rights reserved.
+
 """Code listings source and quick tests."""
 
 import numpy as np
