@@ -19,6 +19,9 @@ This repository contains our experimentation code for experiments on character-l
    - [scmm/pedal/](scmm/pedal) - platform-specific adapters
  - [dev](dev) - development task launch script (tests, lint, etc)
 
+**See also:**
+ - [branch:2023-01-paper](https://github.com/graphcore-research/unit-scaling-demo/tree/2023-01-paper) - additional supporting materials for the paper
+
 ## Usage
 
 This code has been tested on [Poplar SDK](https://www.graphcore.ai/downloads) 3.1.0+1205.
