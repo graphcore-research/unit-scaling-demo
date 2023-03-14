@@ -5,6 +5,7 @@ The included scripts and data is provided for reference, beware that the structu
 **Contents:**
 
  - [examples](examples) code for artificial examples & individual ops
+ - [animation](animation) code to generate an animation explaining Unit Scaling
  - [bert](bert) main MLM (BERT) results and analysis
  - [character_lm](character_lm) character LM (small-model) sweep
 
