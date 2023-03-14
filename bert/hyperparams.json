@@ -1,0 +1,28 @@
+{
+    "Sequence length": "[128, 384] tokens   (phase 1/2)",
+    "Depth": "[12, 24]   (base/large)",
+    "hidden_size": "[768, 1024]   (base/large)",
+    "intermediate_size": "[3072, 4096]   (base/large)",
+    "Attention heads": "[12, 16]   (base/large)",
+    "Attention head size": "64",
+    "Vocabulary size": "30400",
+
+    "Total batch size": "[16320, 4080]   (phase 1/2)",
+    "Micro-batch size": "[8, 2]   (phase 1/2)",
+    "Data-parallel count": "4",
+    "Gradient accumulation count": "510",
+
+    "Training duration": "[28266, 8437] steps   (phase 1/2)",
+    "Learning rate": "[0.0045, 0.0015]   (phase 1/2)",
+    "Learning rate warmup steps": "[2827, 275] steps   (phase 1/2)",
+    "Learning rate decay scheme": "linear",
+
+    "Optimizer": "LAMB",
+    "LAMB Beta1": "0.9",
+    "LAMB Beta2": "0.999",
+    "LAMB epsilon": "1e-06",
+    "Weight decay": "0.01",
+
+    "Loss scaling": "[512, 512, 32768, 128]   (base phase 1/2, large phase 1/2; unit scaling=n/a)",
+    "initializer_range": "0.02   (unit scaling=n/a)"
+}
