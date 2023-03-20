@@ -5,5 +5,5 @@ Setup
 ```
 pip install git+https://github.com/huggingface/optimum-graphcore.git
 pip install git+https://github.com/graphcore-research/poptorch-experimental-addons
-pip install -r requirements.txt
+pip install altair
 ```
