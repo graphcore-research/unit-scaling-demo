@@ -1,5 +1,7 @@
 # Unit Scaling demo
 
+Code for the paper: [Unit Scaling: Out-of-the-Box Low-Precision Training](https://arxiv.org/abs/2303.11257).
+
 We'd like weights, activations & gradients all to be unit-variance at initialisation. To achieve this, we will introduce separate scaling factors for activations in the forwards pass and for gradients in the backwards pass.
 
 This repository contains our experimentation code for experiments on character-level language modelling.
