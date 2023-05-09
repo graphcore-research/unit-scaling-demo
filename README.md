@@ -1,5 +1,7 @@
 # Unit Scaling demo
 
+[![Run on Gradient](https://assets.paperspace.io/img/gradient-badge.svg)](https://console.paperspace.com/github/graphcore-research/unit-scaling-demo?container=graphcore%2Fpytorch-jupyter%3A3.1.0-ubuntu-20.04&machine=Free-IPU-POD4&file=%2Fpytorch-notebook%2Funit-scaling-notebook.ipynb)
+
 Code for the paper: [Unit Scaling: Out-of-the-Box Low-Precision Training](https://arxiv.org/abs/2303.11257).
 
 We'd like weights, activations & gradients all to be unit-variance at initialisation. To achieve this, we will introduce separate scaling factors for activations in the forwards pass and for gradients in the backwards pass.
@@ -20,13 +22,11 @@ This repository contains our experimentation code for experiments on character-l
    - [scmm/uscale/](scmm/uscale) - unit scaling implementation
    - [scmm/pedal/](scmm/pedal) - platform-specific adapters
  - [dev](dev) - development task launch script (tests, lint, etc)
-
-**PyTorch Notebook:**
-
-[![Run on Gradient](https://assets.paperspace.io/img/gradient-badge.svg)](https://console.paperspace.com/github/graphcore-research/unit-scaling-demo?container=graphcore%2Fpytorch-jupyter%3A3.1.0-ubuntu-20.04&machine=Free-IPU-POD4&file=%2Fpytorch-notebook%2Funit-scaling-notebook.ipynb)
-- [pytorch-notebook/unit-scaling-notebook.ipynb](pytorch-notebook/unit-scaling-notebook.ipynb)
+ - [Dataset.ipynb](Dataset.ipynb) - script used to generate the vocabulary from WikiText-103 (raw)
+ - [pytorch-notebook/unit-scaling-notebook.ipynb](pytorch-notebook/unit-scaling-notebook.ipynb)
 
 **See also:**
+ - [pytorch-notebook/unit-scaling-notebook.ipynb](pytorch-notebook/unit-scaling-notebook.ipynb) - standalone PyTorch demo
  - [branch:2023-01-paper](https://github.com/graphcore-research/unit-scaling-demo/tree/2023-01-paper) - additional supporting materials for the paper
 
 ## Usage
