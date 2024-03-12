@@ -1,7 +1,5 @@
 # Unit Scaling demo
 
-[![Run on Gradient](https://assets.paperspace.io/img/gradient-badge.svg)](https://console.paperspace.com/github/graphcore-research/unit-scaling-demo?container=graphcore%2Fpytorch-jupyter%3A3.1.0-ubuntu-20.04&machine=Free-IPU-POD4&file=%2Fpytorch-notebook%2Funit-scaling-notebook.ipynb)
-
 Code for the paper: [Unit Scaling: Out-of-the-Box Low-Precision Training](https://arxiv.org/abs/2303.11257).
 
 We'd like weights, activations & gradients all to be unit-variance at initialisation. To achieve this, we will introduce separate scaling factors for activations in the forwards pass and for gradients in the backwards pass.
